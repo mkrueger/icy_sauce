@@ -8,7 +8,7 @@ pub(crate) const TITLE_LEN: usize = 35;
 pub(crate) const AUTHOR_GROUP_LEN: usize = 20;
 pub(crate) const TINFO_LEN: usize = 22;
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, PartialEq)]
 pub struct SauceHeader {
     /// begins with b"SAUCE"
     /// The title of the file.

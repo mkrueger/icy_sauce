@@ -4,17 +4,51 @@ use chrono::NaiveDate;
 use crate::{
     char_caps::CharCaps,
     header::{SauceHeader, HDR_LEN},
-    sauce_pad, sauce_trim, SauceDataType, SauceError,
+    sauce_pad, sauce_trim, SauceDataType, SauceError, SauceInformationBuilder,
 };
 
 pub(crate) const COMMENT_LEN: usize = 64;
 const COMMENT_ID_LEN: usize = 5;
 const COMMENT_ID: [u8; COMMENT_ID_LEN] = *b"COMNT";
 
+/// For holding SAUCE information which are are altered the meta information
+/// can be used to store easily the sauce information without the capabilities.
+/// 
+/// This contains all information that are part of SAUCE itself. The rest is information about the file content.
+#[derive(Default, Clone, PartialEq)]
+pub struct SauceMetaInformation {
+    /// The title of the file.
+    pub title: BString,
+    /// The (nick)name or handle of the creator of the file.
+    pub author: BString,
+    /// The name of the group or company the creator is employed by.
+    pub group: BString,
+
+    pub comments: Vec<BString>,
+}
+
+impl SauceMetaInformation {
+    pub fn to_builder(&self) -> crate::Result<SauceInformationBuilder> {
+        let mut builder = SauceInformationBuilder::default();
+        builder = builder.with_title(self.title.clone())?;
+        builder = builder.with_author(self.author.clone())?;
+        builder = builder.with_group(self.group.clone())?;
+        for comment in &self.comments {
+            builder = builder.with_comment(comment.clone())?;
+        }
+        Ok(builder)
+    }
+    
+    pub fn is_empty(&self) -> bool {
+        self.title.is_empty() && self.author.is_empty() && self.group.is_empty() && self.comments.is_empty()
+    }   
+}
+
 /// SAUCE information.
 /// This is the main structure for SAUCE.
 ///
 /// SAUCE metadata consits of a header and optional comments.
+#[derive(Clone, PartialEq)]
 pub struct SauceInformation {
     pub(crate) header: SauceHeader,
 
@@ -119,5 +153,14 @@ impl SauceInformation {
             return Err(SauceError::WrongDataType(self.header.data_type));
         }
         CharCaps::from(&self.header)
+    }
+
+    pub fn get_meta_information(&self) -> SauceMetaInformation {
+        SauceMetaInformation {
+            title: self.header.title.clone(),
+            author: self.header.author.clone(),
+            group: self.header.group.clone(),
+            comments: self.comments.clone(),
+        }
     }
 }
