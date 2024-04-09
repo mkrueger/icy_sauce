@@ -13,7 +13,7 @@ const COMMENT_ID: [u8; COMMENT_ID_LEN] = *b"COMNT";
 
 /// For holding SAUCE information which are are altered the meta information
 /// can be used to store easily the sauce information without the capabilities.
-/// 
+///
 /// This contains all information that are part of SAUCE itself. The rest is information about the file content.
 #[derive(Default, Clone, PartialEq)]
 pub struct SauceMetaInformation {
@@ -38,10 +38,13 @@ impl SauceMetaInformation {
         }
         Ok(builder)
     }
-    
+
     pub fn is_empty(&self) -> bool {
-        self.title.is_empty() && self.author.is_empty() && self.group.is_empty() && self.comments.is_empty()
-    }   
+        self.title.is_empty()
+            && self.author.is_empty()
+            && self.group.is_empty()
+            && self.comments.is_empty()
+    }
 }
 
 /// SAUCE information.

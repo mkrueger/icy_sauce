@@ -143,3 +143,15 @@ fn test_build_comments() {
         BString::from("This is another comment")
     );
 }
+
+#[test]
+fn test_sauce_length() {
+    let file = fs::read("tests/files/test1.pcb").unwrap();
+    let info = SauceInformation::read(&file).unwrap().unwrap();
+
+    // the EOF terminator is part of the sauce info according to spec that is what my old implementation did wrong
+    assert_eq!(info.info_len(), 129);
+
+    let new_info = SauceInformationBuilder::default().build().info_len();
+    assert_eq!(new_info, 129);
+}
