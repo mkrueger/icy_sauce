@@ -4,8 +4,8 @@ version = "0.1.1"
 edition = "2021"
 authors = ["Mike Krüger <mkrueger@posteo.de>"]
 description = "Library for handling SAUCE – Standard Architecture for Universal Comment Extensions"
-homepage = "https://www.github.com/mkrueger/icy_sauce"
-repository = "https://www.github.com/mkrueger/icy_sauce"
+homepage = "https://github.com/mkrueger/icy_sauce"
+repository = "https://github.com/mkrueger/icy_sauce"
 license-file = "LICENSE"
 keywords = ["ansi", "ansiart", "sauce"]
 
