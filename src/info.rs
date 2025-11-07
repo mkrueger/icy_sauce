@@ -3,8 +3,13 @@ use chrono::NaiveDate;
 
 use crate::{
     SauceDataType, SauceError, SauceInformationBuilder,
+    archieve_caps::ArchiveCaps,
+    audio_caps::AudioCaps,
+    bin_caps::BinCaps,
     char_caps::CharCaps,
+    executable_caps::ExecutableCaps,
     header::{HDR_LEN, SauceHeader},
+    pixel_caps::PixelCaps,
     sauce_pad, sauce_trim,
 };
 
@@ -68,29 +73,43 @@ impl SauceInformation {
 
         let mut comments = Vec::new();
         if header.comments > 0 {
-            let sauce_len = HDR_LEN + header.comments as usize * COMMENT_LEN + COMMENT_ID_LEN;
-            if data.len() < sauce_len {
+            let expected = HDR_LEN + header.comments as usize * COMMENT_LEN + COMMENT_ID_LEN;
+            if data.len() < expected {
                 return Err(SauceError::InvalidCommentBlock);
             }
-            let mut data = &data[data.len() - sauce_len..];
+            let mut cdata = &data[data.len() - expected..];
+            if &cdata[..COMMENT_ID_LEN] != COMMENT_ID {
+                // Non-fatal per spec: ignore comments
+                log::warn!("SAUCE comment block missing COMNT ID - ignoring comments");
+            } else {
+                cdata = &cdata[COMMENT_ID_LEN..];
+                for _ in 0..header.comments {
+                    comments.push(sauce_trim(&cdata[..COMMENT_LEN]));
+                    cdata = &cdata[COMMENT_LEN..];
+                }
+            }
+        }
 
-            if COMMENT_ID != data[..COMMENT_ID_LEN] {
-                return Err(SauceError::InvalidCommentId(BString::new(
-                    data[..5].to_vec(),
-                )));
-            }
-            data = &data[COMMENT_ID_LEN..];
-            for _ in 0..header.comments {
-                let comment = sauce_trim(&data[..COMMENT_LEN]);
-                comments.push(comment);
-                data = &data[COMMENT_LEN..];
-            }
+        // Check EOF marker at the correct position
+        // EOF should be right before the SAUCE data (including comment block if present)
+        let sauce_size = if header.comments > 0 {
+            HDR_LEN + header.comments as usize * COMMENT_LEN + COMMENT_ID_LEN
+        } else {
+            HDR_LEN
         };
+
+        // Non fatal warning
+        if data.len() > sauce_size {
+            let eof_pos = data.len() - sauce_size - 1;
+            if data[eof_pos] != 0x1A {
+                log::warn!("Missing EOF marker before SAUCE record");
+            }
+        }
 
         Ok(Some(SauceInformation { header, comments }))
     }
 
-    pub fn write<A: std::io::Write>(&self, writer: &mut A, file_size: u32) -> crate::Result<()> {
+    pub fn write<A: std::io::Write>(&self, writer: &mut A) -> crate::Result<()> {
         // EOF Char.
         if let Err(err) = writer.write_all(&[0x1A]) {
             return Err(SauceError::IoError(err));
@@ -108,7 +127,7 @@ impl SauceInformation {
                 return Err(SauceError::IoError(err));
             }
         }
-        self.header.write(writer, file_size)?;
+        self.header.write(writer)?;
         Ok(())
     }
 
@@ -120,6 +139,10 @@ impl SauceInformation {
         } else {
             HDR_LEN + self.header.comments as usize * COMMENT_LEN + COMMENT_ID_LEN + 1
         }
+    }
+
+    pub fn file_size(&self) -> u32 {
+        self.header.file_size
     }
 
     pub fn title(&self) -> &BString {
@@ -134,15 +157,19 @@ impl SauceInformation {
         &self.header.group
     }
 
-    pub fn get_data_type(&self) -> SauceDataType {
+    pub fn data_type(&self) -> SauceDataType {
         self.header.data_type
+    }
+
+    pub fn header(&self) -> &SauceHeader {
+        &self.header
     }
 
     pub fn comments(&self) -> &[BString] {
         &self.comments
     }
 
-    pub fn get_date(&self) -> crate::Result<NaiveDate> {
+    pub fn date(&self) -> crate::Result<NaiveDate> {
         match NaiveDate::parse_from_str(&self.header.date.to_str_lossy(), "%Y%m%d") {
             Ok(d) => Ok(d),
             Err(_) => Err(SauceError::UnsupportedSauceDate(self.header.date.clone())),
@@ -150,13 +177,49 @@ impl SauceInformation {
     }
 
     pub fn get_character_capabilities(&self) -> crate::Result<CharCaps> {
-        if self.header.data_type != SauceDataType::Character
-            && self.header.data_type != SauceDataType::BinaryText
-            && self.header.data_type != SauceDataType::XBin
-        {
-            return Err(SauceError::WrongDataType(self.header.data_type));
+        if self.header.data_type != SauceDataType::Character {
+            return Err(SauceError::UnsupportedDataType(self.header.data_type));
         }
         CharCaps::from(&self.header)
+    }
+
+    pub fn get_binary_capabilities(&self) -> crate::Result<BinCaps> {
+        if self.header.data_type != SauceDataType::BinaryText
+            && self.header.data_type != SauceDataType::XBin
+        {
+            return Err(SauceError::UnsupportedDataType(self.header.data_type));
+        }
+        BinCaps::from(&self.header)
+    }
+
+    pub fn get_pixel_capabilities(&self) -> crate::Result<PixelCaps> {
+        match self.header.data_type {
+            SauceDataType::Bitmap | SauceDataType::Vector => PixelCaps::from(&self.header),
+            SauceDataType::Character if self.header.file_type == 3 => {
+                // RipScript is a special case - Character type but has pixel dimensions
+                PixelCaps::from(&self.header)
+            }
+            _ => Err(SauceError::UnsupportedDataType(self.header.data_type)),
+        }
+    }
+
+    pub fn get_audio_capabilities(&self) -> crate::Result<AudioCaps> {
+        AudioCaps::from(&self.header)
+    }
+
+    /// Get archive capabilities for archive files
+    pub fn get_archive_capabilities(&self) -> crate::Result<ArchiveCaps> {
+        ArchiveCaps::from(&self.header)
+    }
+
+    /// Get executable capabilities for executable files
+    pub fn get_executable_capabilities(&self) -> crate::Result<ExecutableCaps> {
+        ExecutableCaps::from(&self.header)
+    }
+
+    /// Get binary capabilities for binary files
+    pub fn get_bin_capabilities(&self) -> crate::Result<BinCaps> {
+        BinCaps::from(&self.header)
     }
 
     pub fn get_meta_information(&self) -> SauceMetaInformation {

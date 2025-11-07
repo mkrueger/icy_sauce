@@ -13,3 +13,11 @@ keywords = ["ansi", "ansiart", "sauce"]
 thiserror = "2.0.17"
 bstr = "1.12.1"
 chrono = "0.4.42"
+log = "0.4.28"
+
+[dev-dependencies]
+clap = { version = "4.0", features = ["derive"] }
+
+[[example]]
+name = "print_sauce"
+path = "example/print_sauce.rs"

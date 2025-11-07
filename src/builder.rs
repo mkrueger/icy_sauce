@@ -3,8 +3,13 @@ use chrono::NaiveDate;
 
 use crate::{
     COMMENT_LEN, SauceDataType, SauceError,
+    archieve_caps::ArchiveCaps,
+    audio_caps::AudioCaps,
+    bin_caps::BinCaps,
     char_caps::CharCaps,
+    executable_caps::ExecutableCaps,
     header::{AUTHOR_GROUP_LEN, SauceHeader, TITLE_LEN},
+    pixel_caps::PixelCaps,
 };
 
 /// The builder helps creating valid SAUCE records
@@ -46,18 +51,45 @@ impl SauceInformationBuilder {
         self
     }
 
+    pub fn with_file_size(mut self, file_size: u32) -> Self {
+        self.header.file_size = file_size;
+        self
+    }
+
     pub fn with_data_type(mut self, data_type: SauceDataType) -> Self {
         self.header.data_type = data_type;
         self
     }
 
     pub fn with_char_caps(mut self, caps: CharCaps) -> crate::Result<Self> {
-        if self.header.data_type != SauceDataType::Character
-            && self.header.data_type != SauceDataType::XBin
-            && self.header.data_type != SauceDataType::BinaryText
-        {
-            return Err(SauceError::WrongDataType(self.header.data_type));
-        }
+        caps.write_to_header(&mut self.header)?;
+        Ok(self)
+    }
+
+    pub fn with_pixel_caps(mut self, caps: PixelCaps) -> crate::Result<Self> {
+        caps.write_to_header(&mut self.header)?;
+        Ok(self)
+    }
+
+    pub fn with_audio_caps(mut self, caps: AudioCaps) -> crate::Result<Self> {
+        caps.write_to_header(&mut self.header)?;
+        Ok(self)
+    }
+
+    /// Set archive capabilities for archive formats
+    pub fn with_archive_caps(mut self, caps: ArchiveCaps) -> crate::Result<Self> {
+        caps.write_to_header(&mut self.header)?;
+        Ok(self)
+    }
+
+    /// Set executable capabilities for executable formats
+    pub fn with_executable_caps(mut self, caps: ExecutableCaps) -> crate::Result<Self> {
+        caps.write_to_header(&mut self.header)?;
+        Ok(self)
+    }
+
+    /// Set binary capabilities for binary formats
+    pub fn with_bin_caps(mut self, caps: BinCaps) -> crate::Result<Self> {
         caps.write_to_header(&mut self.header)?;
         Ok(self)
     }

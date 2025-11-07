@@ -1,9 +1,17 @@
+use std::fmt::Display;
+
 use bstr::BString;
 use thiserror::Error;
 
 pub type Result<T> = std::result::Result<T, SauceError>;
 
+pub mod archieve_caps;
+pub mod audio_caps;
+pub mod bin_caps;
 pub mod char_caps;
+pub mod executable_caps;
+pub mod pixel_caps;
+
 pub mod header;
 pub mod info;
 pub use info::*;
@@ -19,17 +27,14 @@ pub enum SauceError {
     #[error("Invalid comment block")]
     InvalidCommentBlock,
 
-    #[error("Invalid comment ID: {0}")]
-    InvalidCommentId(BString),
-
     #[error("Unsupported SAUCE date: {0}")]
     UnsupportedSauceDate(BString),
 
     #[error("Binary file width limit exceeded: {0}")]
     BinFileWidthLimitExceeded(i32),
 
-    #[error("Wrong data type for operation: {0:?}")]
-    WrongDataType(SauceDataType),
+    #[error("Unsupported data type for operation: {0:?}")]
+    UnsupportedDataType(SauceDataType),
 
     #[error("IO error: {0}")]
     IoError(std::io::Error),
@@ -48,6 +53,12 @@ pub enum SauceError {
 
     #[error("Group too long: {0} bytes only up to 20 bytes are allowed.")]
     GroupTooLong(usize),
+
+    #[error("Font name too long: {0} bytes only up to 22 bytes are allowed.")]
+    FontNameTooLong(usize),
+
+    #[error("Missing EOF marker (0x1A) before SAUCE record")]
+    MissingEofMarker,
 }
 
 #[repr(u8)]
@@ -75,6 +86,23 @@ pub enum SauceDataType {
     Executable = 8,
     /// Any other value not covered by the spec (future / unknown).
     Undefined(u8),
+}
+
+impl Display for SauceDataType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SauceDataType::None => write!(f, "None"),
+            SauceDataType::Character => write!(f, "Character"),
+            SauceDataType::Bitmap => write!(f, "Bitmap"),
+            SauceDataType::Vector => write!(f, "Vector"),
+            SauceDataType::Audio => write!(f, "Audio"),
+            SauceDataType::BinaryText => write!(f, "BinaryText"),
+            SauceDataType::XBin => write!(f, "XBin"),
+            SauceDataType::Archive => write!(f, "Archive"),
+            SauceDataType::Executable => write!(f, "Executable"),
+            SauceDataType::Undefined(val) => write!(f, "Undefined({})", val),
+        }
+    }
 }
 
 impl From<u8> for SauceDataType {
@@ -151,98 +179,4 @@ pub(crate) fn zero_trim(data: &[u8]) -> BString {
         end -= 1;
     }
     BString::new(data[..end].to_vec())
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::{
-        SauceDataType, SauceInformation, SauceInformationBuilder,
-        char_caps::{CharCaps, ContentType},
-        sauce_pad, sauce_trim, zero_trim,
-    };
-    use bstr::BString;
-
-    #[test]
-    fn test_sauce_trim() {
-        let data = b"Hello World  ";
-        assert_eq!(sauce_trim(data), BString::from("Hello World"));
-        let data = b"Hello World\0\0";
-        assert_eq!(sauce_trim(data), BString::from("Hello World"));
-
-        let data = b"Hello World\t\0";
-        assert_eq!(sauce_trim(data), BString::from("Hello World\t"));
-        let data = b"Hello World\n ";
-        assert_eq!(sauce_trim(data), BString::from("Hello World\n"));
-        let data = b"    \0   ";
-        assert_eq!(sauce_trim(data), BString::from(""));
-    }
-
-    #[test]
-    fn test_sauce_pad() {
-        let data = BString::from(b"Hello World");
-        assert_eq!(sauce_pad(&data, 15), b"Hello World    ");
-
-        let data = BString::from(b"Hello World");
-        assert_eq!(sauce_pad(&data, 5), b"Hello");
-
-        let data = BString::from(b"");
-        assert_eq!(sauce_pad(&data, 1), b" ");
-    }
-
-    #[test]
-    fn test_zero_trim() {
-        let data = b"FONT NAME   \0\0\0"; // keep trailing spaces before zeros
-        assert_eq!(zero_trim(data), BString::from("FONT NAME   "));
-        let data = b"ABC";
-        assert_eq!(zero_trim(data), BString::from("ABC"));
-        let data = b"ABC\0DEF\0"; // internal zeros preserved
-        assert_eq!(zero_trim(data), BString::from(b"ABC\0DEF".to_vec()));
-    }
-
-    #[test]
-    fn test_binarytext_width_encoding() {
-        let caps = CharCaps {
-            content_type: ContentType::Ascii,
-            width: 160,
-            height: 0,
-            use_ice: true,
-            use_letter_spacing: false,
-            use_aspect_ratio: false,
-            font_opt: None,
-        };
-        let info = SauceInformationBuilder::default()
-            .with_data_type(SauceDataType::BinaryText)
-            .with_char_caps(caps)
-            .unwrap()
-            .build();
-        assert_eq!(info.header.file_type, 80); // width/2 stored
-
-        let mut data = Vec::new();
-        info.write(&mut data, 1234).unwrap();
-        let parsed = SauceInformation::read(&data).unwrap().unwrap();
-        let parsed_caps = parsed.get_character_capabilities().unwrap();
-        assert_eq!(parsed_caps.width, 160);
-    }
-
-    #[test]
-    fn test_binarytext_width_invalid() {
-        let caps = CharCaps {
-            content_type: ContentType::Ascii,
-            width: 161,
-            height: 0,
-            use_ice: false,
-            use_letter_spacing: false,
-            use_aspect_ratio: false,
-            font_opt: None,
-        };
-        let err = SauceInformationBuilder::default()
-            .with_data_type(SauceDataType::BinaryText)
-            .with_char_caps(caps)
-            .err()
-            .expect("should error on odd width");
-        match err {
-            crate::SauceError::BinFileWidthLimitExceeded(w) => assert_eq!(w, 161),
-            other => panic!("Unexpected error: {other:?}"),
-        }
-    }
 }

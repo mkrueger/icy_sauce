@@ -21,6 +21,9 @@ pub struct SauceHeader {
     /// The format for the date is CCYYMMDD (century, year, month, day).
     pub date: BString,
 
+    /// Size of the original file in bytes.
+    pub file_size: u32,
+
     /// Type of data.
     pub data_type: SauceDataType,
 
@@ -58,50 +61,52 @@ impl SauceHeader {
         if data.len() < HDR_LEN {
             return Ok(None);
         }
+        let header_start = data.len() - HDR_LEN;
 
-        let mut data = &data[data.len() - HDR_LEN..];
-        if SAUCE_ID != &data[..5] {
+        let mut header = &data[header_start..];
+        if SAUCE_ID != &header[..5] {
             return Ok(None);
         }
-        data = &data[5..];
+        header = &header[5..];
 
-        if b"00" != &data[0..2] {
+        if b"00" != &header[0..2] {
             return Err(SauceError::UnsupportedSauceVersion(BString::new(
-                data[0..2].to_vec(),
+                header[0..2].to_vec(),
             )));
         }
-        data = &data[2..];
+        header = &header[2..];
 
-        let title = sauce_trim(&data[0..TITLE_LEN]);
-        data = &data[TITLE_LEN..];
-        let author = sauce_trim(&data[0..AUTHOR_GROUP_LEN]);
-        data = &data[AUTHOR_GROUP_LEN..];
-        let group = sauce_trim(&data[0..AUTHOR_GROUP_LEN]);
-        data = &data[AUTHOR_GROUP_LEN..];
+        let title = sauce_trim(&header[0..TITLE_LEN]);
+        header = &header[TITLE_LEN..];
+        let author = sauce_trim(&header[0..AUTHOR_GROUP_LEN]);
+        header = &header[AUTHOR_GROUP_LEN..];
+        let group = sauce_trim(&header[0..AUTHOR_GROUP_LEN]);
+        header = &header[AUTHOR_GROUP_LEN..];
 
-        let creation_date = BString::new(data[0..8].to_vec());
+        let (date_bytes, rest) = header.split_at(8);
+        let date = BString::new(date_bytes.to_vec());
+        let (size_bytes, rest) = rest.split_at(4);
+        let file_size = u32::from_le_bytes(size_bytes.try_into().unwrap());
+        header = rest;
 
-        // skip file_size - we can calculate it, better than to rely on random 3rd party software.
-        // Question: are there files where that is important?
-        data = &data[8 + 4..];
+        let data_type = SauceDataType::from(header[0]);
+        let file_type = header[1];
+        let t_info1 = header[2] as u16 + ((header[3] as u16) << 8);
+        let t_info2 = header[4] as u16 + ((header[5] as u16) << 8);
+        let t_info3 = header[6] as u16 + ((header[7] as u16) << 8);
+        let t_info4 = header[8] as u16 + ((header[9] as u16) << 8);
+        let num_comments = header[10];
+        let t_flags = header[11];
+        header = &header[12..];
 
-        let data_type = SauceDataType::from(data[0]);
-        let file_type = data[1];
-        let t_info1 = data[2] as u16 + ((data[3] as u16) << 8);
-        let t_info2 = data[4] as u16 + ((data[5] as u16) << 8);
-        let t_info3 = data[6] as u16 + ((data[7] as u16) << 8);
-        let t_info4 = data[8] as u16 + ((data[9] as u16) << 8);
-        let num_comments = data[10];
-        let t_flags = data[11];
-        data = &data[12..];
-
-        assert_eq!(data.len(), TINFO_LEN);
-        let t_info_s = zero_trim(data); // zero-padded field
+        assert_eq!(header.len(), TINFO_LEN);
+        let t_info_s = zero_trim(header); // zero-padded field
         Ok(Some(Self {
             title,
             author,
             group,
-            date: creation_date,
+            date,
+            file_size,
             data_type,
             file_type,
             t_info1,
@@ -117,7 +122,7 @@ impl SauceHeader {
     /// Writes the SAUCE header to a writer.
     /// Note that file_size can't be determined by the header alone, so it must be provided.
     /// Comments are written prior to the header.
-    pub fn write<A: std::io::Write>(&self, writer: &mut A, file_size: u32) -> crate::Result<()> {
+    pub fn write<A: std::io::Write>(&self, writer: &mut A) -> crate::Result<()> {
         let mut sauce_info = Vec::with_capacity(HDR_LEN);
         sauce_info.extend(SAUCE_ID);
         sauce_info.extend(b"00");
@@ -125,7 +130,7 @@ impl SauceHeader {
         sauce_info.extend(sauce_pad(&self.author, AUTHOR_GROUP_LEN));
         sauce_info.extend(sauce_pad(&self.group, AUTHOR_GROUP_LEN));
         sauce_info.extend(sauce_pad(&self.date, 8));
-        sauce_info.extend(file_size.to_le_bytes());
+        sauce_info.extend(self.file_size.to_le_bytes());
         sauce_info.push(self.data_type.into());
         sauce_info.push(self.file_type);
         sauce_info.extend(&self.t_info1.to_le_bytes());
