@@ -1,6 +1,6 @@
 use bstr::BString;
 
-use crate::{header::SauceHeader, SauceDataType};
+use crate::{SauceDataType, SauceError, header::SauceHeader};
 
 /// | Field    | Type | Size | Descritption
 /// |----------|------|------|-------------
@@ -33,8 +33,8 @@ pub struct CharCaps {
     pub width: u16,
     pub height: u16,
     pub use_ice: bool,
-    pub use_letter_spacing: bool,
-    pub use_aspect_ratio: bool,
+    pub use_letter_spacing: bool, // true == 9px spacing
+    pub use_aspect_ratio: bool,   // true == stretch for legacy tall pixels
     pub font_opt: Option<BString>,
 }
 
@@ -162,10 +162,14 @@ impl CharCaps {
         })
     }
 
-    pub(crate) fn write_to_header(&self, header: &mut SauceHeader) {
+    pub(crate) fn write_to_header(&self, header: &mut SauceHeader) -> crate::Result<()> {
         match header.data_type {
             SauceDataType::BinaryText => {
-                header.file_type = sauce_file_type::ASCII;
+                // BinaryText: file_type encodes width/2; width must be even and <= 510.
+                if self.width == 0 || self.width % 2 != 0 || self.width > 510 {
+                    return Err(SauceError::BinFileWidthLimitExceeded(self.width as i32));
+                }
+                header.file_type = (self.width / 2) as u8;
                 header.t_flags = if self.use_ice {
                     ANSI_FLAG_NON_BLINK_MODE
                 } else {
@@ -225,5 +229,6 @@ impl CharCaps {
                 unreachable!("This should never happen")
             }
         }
+        Ok(())
     }
 }

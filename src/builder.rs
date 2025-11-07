@@ -2,9 +2,9 @@ use bstr::BString;
 use chrono::NaiveDate;
 
 use crate::{
+    COMMENT_LEN, SauceDataType, SauceError,
     char_caps::CharCaps,
-    header::{SauceHeader, AUTHOR_GROUP_LEN, TITLE_LEN},
-    SauceDataType, SauceError, COMMENT_LEN,
+    header::{AUTHOR_GROUP_LEN, SauceHeader, TITLE_LEN},
 };
 
 /// The builder helps creating valid SAUCE records
@@ -58,7 +58,7 @@ impl SauceInformationBuilder {
         {
             return Err(SauceError::WrongDataType(self.header.data_type));
         }
-        caps.write_to_header(&mut self.header);
+        caps.write_to_header(&mut self.header)?;
         Ok(self)
     }
 
