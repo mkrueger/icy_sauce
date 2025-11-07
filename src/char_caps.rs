@@ -114,12 +114,24 @@ pub enum LetterSpacing {
     Reserved,   // 11
 }
 
+impl LetterSpacing {
+    pub fn use_letter_spacing(self) -> bool {
+        self == LetterSpacing::NinePixel
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum AspectRatio {
     Legacy,       // 00
     LegacyDevice, // 01 (needs stretching)
     Square,       // 10 (modern, no stretch)
     Reserved,     // 11
+}
+
+impl AspectRatio {
+    pub fn use_aspect_ratio(self) -> bool {
+        self == AspectRatio::LegacyDevice
+    }
 }
 
 #[derive(Debug, Clone)]
