@@ -230,4 +230,11 @@ impl SauceInformation {
             comments: self.comments.clone(),
         }
     }
+
+    pub fn to_builder(&self) -> SauceInformationBuilder {
+        SauceInformationBuilder {
+            header: self.header.clone(),
+            comments: self.comments.clone(),
+        }
+    }
 }

@@ -15,10 +15,10 @@ use crate::{
 /// The builder helps creating valid SAUCE records
 #[derive(Default)]
 pub struct SauceInformationBuilder {
-    header: SauceHeader,
+    pub(crate) header: SauceHeader,
 
     /// Up to 255 comments, each 64 bytes long max.
-    comments: Vec<BString>,
+    pub(crate) comments: Vec<BString>,
 }
 
 impl SauceInformationBuilder {
