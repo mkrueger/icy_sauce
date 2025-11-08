@@ -35,7 +35,7 @@
 
 use bstr::BString;
 
-use crate::{SauceDataType, SauceError, header::SauceHeader};
+use crate::{SauceDataType, SauceError, header::SauceHeader, limits};
 
 /// ANSI flags bitmask for non-blink mode (ice colors).
 /// When set (bit 0), the 16 background colors become available instead of blinking.
@@ -320,7 +320,7 @@ pub struct CharacterCapabilities {
     /// Pixel aspect ratio for rendering
     pub aspect_ratio: AspectRatio,
     /// Optional font name (max 22 bytes)
-    font_opt: Option<BString>,
+    pub font_opt: Option<BString>,
 }
 
 impl CharacterCapabilities {
@@ -406,7 +406,7 @@ impl CharacterCapabilities {
     ) -> crate::Result<Self> {
         // Validate font length if provided
         if let Some(ref f) = font {
-            if f.len() > 22 {
+            if f.len() > limits::MAX_FONT_NAME_LENGTH {
                 return Err(SauceError::FontNameTooLong(f.len()));
             }
         }
@@ -466,7 +466,7 @@ impl CharacterCapabilities {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn set_font(&mut self, font: BString) -> crate::Result<()> {
-        if font.len() > 22 {
+        if font.len() > limits::MAX_FONT_NAME_LENGTH {
             return Err(SauceError::FontNameTooLong(font.len()));
         }
         if font.is_empty() {
@@ -584,6 +584,9 @@ impl CharacterCapabilities {
                         };
 
                         if let Some(font) = &self.font_opt {
+                            if font.len() > limits::MAX_FONT_NAME_LENGTH {
+                                return Err(SauceError::FontNameTooLong(font.len()));
+                            }
                             header.t_info_s.clone_from(font);
                         } else {
                             header.t_info_s.clear();

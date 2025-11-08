@@ -40,6 +40,7 @@
 
 use bstr::BString;
 
+use crate::limits;
 use crate::{SauceDataType, SauceError, header::SauceHeader};
 
 use crate::character::{
@@ -165,7 +166,7 @@ pub struct BinaryCapabilities {
     /// Pixel aspect ratio for rendering
     pub aspect_ratio: AspectRatio,
     /// Optional font name (max 22 bytes)
-    font_opt: Option<BString>,
+    pub font_opt: Option<BString>,
 }
 
 impl BinaryCapabilities {
@@ -288,7 +289,7 @@ impl BinaryCapabilities {
     /// assert_eq!(caps.font(), Some(&BString::from("IBM VGA")));
     /// ```
     pub fn set_font(&mut self, font: BString) -> crate::Result<()> {
-        if font.len() > 22 {
+        if font.len() > limits::MAX_FONT_NAME_LENGTH {
             return Err(SauceError::FontNameTooLong(font.len()));
         }
         if font.is_empty() {
@@ -433,6 +434,9 @@ impl BinaryCapabilities {
                 };
 
                 if let Some(font) = &self.font_opt {
+                    if font.len() > limits::MAX_FONT_NAME_LENGTH {
+                        return Err(SauceError::FontNameTooLong(font.len()));
+                    }
                     header.t_info_s.clone_from(font);
                 } else {
                     header.t_info_s.clear();
