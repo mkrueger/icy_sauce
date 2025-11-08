@@ -20,6 +20,7 @@ pub use builder::*;
 mod date;
 pub use date::*;
 pub mod limits;
+pub mod prelude; // public convenience re-exports
 
 #[derive(Error, Debug)]
 pub enum SauceError {
