@@ -5,19 +5,26 @@ use thiserror::Error;
 
 pub type Result<T> = std::result::Result<T, SauceError>;
 
-pub mod archieve_caps;
-pub mod audio_caps;
-pub mod bin_caps;
-pub mod char_caps;
-pub mod executable_caps;
-pub mod pixel_caps;
-
+mod capabilities;
+pub use capabilities::*;
 pub mod header;
-pub mod info;
-pub use info::*;
+pub mod record;
+pub use record::*;
+
+mod metadata;
+pub use metadata::*;
 
 pub mod builder;
 pub use builder::*;
+
+pub mod limits {
+    pub const MAX_TITLE_LENGTH: usize = 35;
+    pub const MAX_AUTHOR_LENGTH: usize = 20;
+    pub const MAX_GROUP_LENGTH: usize = 20;
+    pub const MAX_COMMENT_LENGTH: usize = 64;
+    pub const MAX_COMMENTS: usize = 255;
+    pub const DATE_LENGTH: usize = 8;
+}
 
 #[derive(Error, Debug)]
 pub enum SauceError {
