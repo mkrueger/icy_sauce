@@ -142,7 +142,7 @@ impl BinaryFormat {
 ///     .font(BString::from("IBM VGA")).unwrap();
 /// assert_eq!(binary_text.columns, 80);
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct BinaryCapabilities {
     /// Binary text format (BinaryText or XBIN)
     pub format: BinaryFormat,
@@ -338,41 +338,13 @@ impl BinaryCapabilities {
     /// let mut header = SauceHeader::default();
     /// header.data_type = SauceDataType::BinaryText;
     /// header.file_type = 40; // width = 80
-    /// let caps = BinaryCapabilities::from(&header).unwrap();
+    /// use std::convert::TryFrom;
+    /// let caps = BinaryCapabilities::try_from(&header).unwrap();
     /// assert_eq!(caps.columns, 80);
     /// ```
-    pub fn from(header: &SauceHeader) -> crate::Result<Self> {
-        let format = BinaryFormat::from_data_type(header.data_type)?;
-
-        match format {
-            BinaryFormat::BinaryText => {
-                let width = (header.file_type as u16) * 2;
-                if width == 0 {
-                    return Err(SauceError::BinFileWidthLimitExceeded(0));
-                }
-
-                let font = if header.t_info_s.is_empty() {
-                    None
-                } else {
-                    Some(header.t_info_s.clone())
-                };
-                Ok(Self {
-                    format,
-                    columns: width,
-                    lines: 0,
-                    flags: header.t_flags,
-                    font,
-                })
-            }
-            BinaryFormat::XBin => Ok(Self {
-                format,
-                columns: header.t_info1,
-                lines: header.t_info2,
-                flags: 0,
-                font: None,
-            }),
-        }
-    }
+    /// This example uses the `TryFrom<&SauceHeader>` implementation on `BinaryCapabilities`.
+    /// The bespoke `from(&SauceHeader)` constructor has been removed in favor of the
+    /// standard conversion trait.
 
     /// Serialize binary text capabilities into a SAUCE header.
     ///
@@ -489,6 +461,24 @@ impl BinaryCapabilities {
             None
         } else {
             Some(h as u16)
+        }
+    }
+}
+
+impl TryFrom<&SauceHeader> for BinaryCapabilities {
+    type Error = SauceError;
+    fn try_from(header: &SauceHeader) -> crate::Result<Self> {
+        let format = BinaryFormat::from_data_type(header.data_type)?;
+        match format {
+            BinaryFormat::BinaryText => {
+                let width = (header.file_type as u16) * 2;
+                if width == 0 {
+                    return Err(SauceError::BinFileWidthLimitExceeded(0));
+                }
+                let font = if header.t_info_s.is_empty() { None } else { Some(header.t_info_s.clone()) };
+                Ok(Self { format, columns: width, lines: 0, flags: header.t_flags, font })
+            }
+            BinaryFormat::XBin => Ok(Self { format, columns: header.t_info1, lines: header.t_info2, flags: 0, font: None }),
         }
     }
 }

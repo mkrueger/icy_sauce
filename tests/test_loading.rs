@@ -12,10 +12,10 @@ fn test_sauce_length() {
     let info = SauceRecord::from_bytes(&file).unwrap().unwrap();
 
     // the EOF terminator is part of the sauce info according to spec that is what my old implementation did wrong
-    assert_eq!(info.record_len(), 129);
+    assert_eq!(info.record_len(), 128);
 
     let new_info = SauceRecordBuilder::default().build().record_len();
-    assert_eq!(new_info, 129);
+    assert_eq!(new_info, 128);
 }
 
 #[test]
@@ -23,7 +23,7 @@ fn test_simple_file() {
     let file = fs::read("tests/files/test1.pcb").unwrap();
     let info = SauceRecord::from_bytes(&file).unwrap().unwrap();
     assert!(info.comments().is_empty());
-    assert_eq!(info.record_len(), 129);
+    assert_eq!(info.record_len(), 128);
     assert_eq!(info.title(), &BString::from("Title"));
     assert_eq!(info.group(), &BString::from("Group"));
     assert_eq!(info.author(), &BString::from("Author"));
@@ -46,7 +46,7 @@ fn test_comments() {
     let file = fs::read("tests/files/test2.ans").unwrap();
     let info = SauceRecord::from_bytes(&file).unwrap().unwrap();
     assert_eq!(info.comments().len(), 2);
-    assert_eq!(info.record_len(), 129 + 2 * 64 + 5);
+    assert_eq!(info.record_len(), 128 + 2 * 64 + 5);
     assert_eq!(info.title(), &BString::from("Title"));
     assert_eq!(info.group(), &BString::from("Group"));
     assert_eq!(info.author(), &BString::from("Author"));

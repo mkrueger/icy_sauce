@@ -16,16 +16,15 @@
 //! # Example
 //!
 //! ```
-//! use icy_sauce::{SauceRecordBuilder, SauceDataType, Capabilities};
+//! use icy_sauce::{SauceRecordBuilder, SauceDataType, Capabilities, SauceDate};
 //! use icy_sauce::ExecutableCapabilities;
 //! use bstr::BString;
-//! use chrono::Local;
 //!
 //! let exe_caps = ExecutableCapabilities::new();
 //! let sauce = SauceRecordBuilder::default()
 //!     .title(BString::from("Setup Program"))?
 //!     .author(BString::from("Developer"))?
-//!     .date(Local::now().naive_local().date())
+//!     .date(SauceDate::new(2025, 11, 8))
 //!     .data_type(SauceDataType::Executable)
 //!     .capabilities(Capabilities::Executable(exe_caps))?
 //!     .build();
@@ -57,7 +56,7 @@ use crate::{SauceDataType, SauceError, header::SauceHeader};
 /// use icy_sauce::ExecutableCapabilities;
 /// let caps = ExecutableCapabilities::new();
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ExecutableCapabilities {
     // No specific fields needed - executable type is always 0
 }
@@ -78,44 +77,8 @@ impl ExecutableCapabilities {
         ExecutableCapabilities {}
     }
 
-    /// Parse executable capabilities from a SAUCE header.
-    ///
-    /// # Arguments
-    ///
-    /// * `header` - The SAUCE header to parse
-    ///
-    /// # Errors
-    ///
-    /// Returns [`SauceError::UnsupportedDataType`] if the header's DataType is not
-    /// [`SauceDataType::Executable`].
-    ///
-    /// # Behavior
-    ///
-    /// While the SAUCE specification requires FileType to be 0 for executables,
-    /// this implementation is tolerant of malformed SAUCE records and does not
-    /// strictly enforce this constraint.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// // Internal parsing example (ignored because `ExecutableCapabilities::from` is not public)
-    /// # use icy_sauce::{header::SauceHeader, SauceDataType};
-    /// # use icy_sauce::ExecutableCapabilities;
-    /// let mut header = SauceHeader::default();
-    /// header.data_type = SauceDataType::Executable;
-    /// let caps = ExecutableCapabilities::from(&header)?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
-    pub(crate) fn from(header: &SauceHeader) -> crate::Result<Self> {
-        if header.data_type != SauceDataType::Executable {
-            return Err(SauceError::UnsupportedDataType(header.data_type));
-        }
-
-        // File type should be 0 for executables
-        // We don't enforce this strictly to be tolerant of malformed SAUCE
-
-        Ok(ExecutableCapabilities {})
-    }
+    /// Parse executable capabilities from a SAUCE header via `TryFrom<&SauceHeader>`.
+    /// The bespoke internal `from(&SauceHeader)` has been removed.
 
     /// Serialize executable capabilities into a SAUCE header.
     ///
@@ -159,6 +122,16 @@ impl ExecutableCapabilities {
         header.t_info_s.clear();
 
         Ok(())
+    }
+}
+
+impl TryFrom<&SauceHeader> for ExecutableCapabilities {
+    type Error = SauceError;
+    fn try_from(header: &SauceHeader) -> crate::Result<Self> {
+        if header.data_type != SauceDataType::Executable {
+            return Err(SauceError::UnsupportedDataType(header.data_type));
+        }
+        Ok(ExecutableCapabilities {})
     }
 }
 

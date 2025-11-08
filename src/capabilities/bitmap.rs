@@ -24,7 +24,7 @@
 //! assert_eq!(caps.height, 0);
 //! ```
 
-use crate::{SauceDataType, header::SauceHeader};
+use crate::{SauceDataType, SauceError, header::SauceHeader};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 /// Graphics format types supported by the SAUCE v00 specification.
@@ -211,7 +211,7 @@ impl BitmapFormat {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 /// Graphics/pixel format capabilities.
 ///
 /// `BitmapCapabilities` describes bitmap or vector graphics files stored with SAUCE metadata,
@@ -324,39 +324,13 @@ impl BitmapCapabilities {
     /// header.t_info1 = 640;
     /// header.t_info2 = 480;
     /// header.t_info3 = 24;
-    /// let caps = BitmapCapabilities::from(&header).unwrap();
+    /// use std::convert::TryFrom;
+    /// let caps = BitmapCapabilities::try_from(&header).unwrap();
     /// assert_eq!(caps.format, BitmapFormat::Png);
     /// assert_eq!(caps.width, 640);
     /// ```
-    pub(crate) fn from(header: &SauceHeader) -> crate::Result<Self> {
-        let graphics_format = BitmapFormat::from_sauce(header.data_type, header.file_type);
-
-        let (width, height, pixel_depth) = match header.data_type {
-            SauceDataType::Character if header.file_type == 3 => {
-                // RipScript has fixed dimensions per spec
-                (640, 350, 16) // 640x350 pixels, 16 colors
-            }
-            SauceDataType::Bitmap => {
-                // All bitmap formats use TInfo1-3 for dimensions
-                (header.t_info1, header.t_info2, header.t_info3)
-            }
-            SauceDataType::Vector => {
-                // Vector formats don't have pixel dimensions
-                (0, 0, 0)
-            }
-            _ => {
-                // Shouldn't happen but handle gracefully
-                (0, 0, 0)
-            }
-        };
-
-        Ok(BitmapCapabilities {
-            format: graphics_format,
-            width,
-            height,
-            pixel_depth,
-        })
-    }
+    /// The bespoke internal `from(&SauceHeader)` has been replaced by a `TryFrom<&SauceHeader>`
+    /// implementation for idiomatic conversion.
 
     /// Serialize graphics capabilities into a SAUCE header.
     ///
@@ -473,5 +447,18 @@ impl BitmapCapabilities {
                 | BitmapFormat::Mpg
                 | BitmapFormat::Avi
         )
+    }
+}
+
+impl TryFrom<&SauceHeader> for BitmapCapabilities {
+    type Error = SauceError;
+    fn try_from(header: &SauceHeader) -> crate::Result<Self> {
+        let graphics_format = BitmapFormat::from_sauce(header.data_type, header.file_type);
+        let (width, height, pixel_depth) = match header.data_type {
+            SauceDataType::Character if header.file_type == 3 => (640, 350, 16),
+            SauceDataType::Bitmap => (header.t_info1, header.t_info2, header.t_info3),
+            _ => return Err(SauceError::UnsupportedDataType(header.data_type)),
+        };
+        Ok(BitmapCapabilities { format: graphics_format, width, height, pixel_depth })
     }
 }

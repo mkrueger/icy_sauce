@@ -48,14 +48,13 @@
 
 use bstr::BString;
 
-use crate::{SauceDataType, SauceError, sauce_pad, sauce_trim, zero_pad, zero_trim};
+use crate::{
+    SauceDataType, SauceDate, SauceError, limits, sauce_pad, trim_spaces, zero_pad, zero_trim,
+};
 
 pub(crate) const HDR_LEN: usize = 128;
 const SAUCE_ID: &[u8; 5] = b"SAUCE";
-/// Maximum length for the title field in bytes (space-padded)
-pub(crate) const TITLE_LEN: usize = 35;
-/// Maximum length for author and group fields in bytes (space-padded)
-pub(crate) const AUTHOR_GROUP_LEN: usize = 20;
+
 /// Maximum length for the TInfoS field in bytes (zero-padded)
 pub(crate) const TINFO_LEN: usize = 22;
 
@@ -98,8 +97,7 @@ pub struct SauceHeader {
     /// The group or company name (space-padded in storage, up to 20 bytes)
     pub group: BString,
 
-    /// The date in CCYYMMDD format (8 bytes: century, year, month, day)
-    pub date: BString,
+    pub date: SauceDate,
 
     /// Size of the original file in bytes (excluding SAUCE metadata)
     pub file_size: u32,
@@ -190,15 +188,15 @@ impl SauceHeader {
         }
         header = &header[2..];
 
-        let title = sauce_trim(&header[0..TITLE_LEN]);
-        header = &header[TITLE_LEN..];
-        let author = sauce_trim(&header[0..AUTHOR_GROUP_LEN]);
-        header = &header[AUTHOR_GROUP_LEN..];
-        let group = sauce_trim(&header[0..AUTHOR_GROUP_LEN]);
-        header = &header[AUTHOR_GROUP_LEN..];
+        let title = trim_spaces(&header[0..limits::MAX_TITLE_LENGTH]);
+        header = &header[limits::MAX_TITLE_LENGTH..];
+        let author = trim_spaces(&header[0..limits::MAX_AUTHOR_LENGTH]);
+        header = &header[limits::MAX_AUTHOR_LENGTH..];
+        let group = trim_spaces(&header[0..limits::MAX_GROUP_LENGTH]);
+        header = &header[limits::MAX_GROUP_LENGTH..];
 
         let (date_bytes, rest) = header.split_at(8);
-        let date = BString::new(date_bytes.to_vec());
+        let date = SauceDate::from_bytes(date_bytes).unwrap_or_default();
         let (size_bytes, rest) = rest.split_at(4);
         let file_size = u32::from_le_bytes(size_bytes.try_into().unwrap());
         header = rest;
@@ -276,10 +274,10 @@ impl SauceHeader {
         let mut sauce_info = Vec::with_capacity(HDR_LEN);
         sauce_info.extend(SAUCE_ID);
         sauce_info.extend(b"00");
-        sauce_info.extend(sauce_pad(&self.title, TITLE_LEN));
-        sauce_info.extend(sauce_pad(&self.author, AUTHOR_GROUP_LEN));
-        sauce_info.extend(sauce_pad(&self.group, AUTHOR_GROUP_LEN));
-        sauce_info.extend(sauce_pad(&self.date, 8));
+        sauce_info.extend(sauce_pad(&self.title, limits::MAX_TITLE_LENGTH));
+        sauce_info.extend(sauce_pad(&self.author, limits::MAX_AUTHOR_LENGTH));
+        sauce_info.extend(sauce_pad(&self.group, limits::MAX_GROUP_LENGTH));
+        self.date.write(&mut sauce_info)?;
         sauce_info.extend(self.file_size.to_le_bytes());
         sauce_info.push(self.data_type.into());
         sauce_info.push(self.file_type);

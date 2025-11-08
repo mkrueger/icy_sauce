@@ -69,7 +69,7 @@ impl VectorFormat {
 ///
 /// Represents vector-specific metadata parsed from or to be written to a SAUCE header.
 /// This includes the vector format and optional dimensions.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct VectorCapabilities {
     /// Vector graphics format
     pub format: VectorFormat,
@@ -81,16 +81,8 @@ impl VectorCapabilities {
         Self { format }
     }
 
-    /// Parse vector capabilities from a SAUCE header.
-    pub(crate) fn from(header: &SauceHeader) -> crate::Result<Self> {
-        if header.data_type != SauceDataType::Vector {
-            return Err(SauceError::UnsupportedDataType(header.data_type));
-        }
-
-        let format = VectorFormat::from_sauce(header.file_type);
-
-        Ok(Self { format })
-    }
+    /// Parse vector capabilities from a SAUCE header via the `TryFrom<&SauceHeader>` implementation.
+    /// The former bespoke `from(&SauceHeader)` has been removed in favor of the standard trait.
 
     /// Serialize vector capabilities into a SAUCE header.
     pub(crate) fn encode_into_header(&self, header: &mut SauceHeader) -> crate::Result<()> {
@@ -108,6 +100,16 @@ impl VectorCapabilities {
         header.t_info_s.clear();
 
         Ok(())
+    }
+}
+
+impl TryFrom<&SauceHeader> for VectorCapabilities {
+    type Error = SauceError;
+    fn try_from(header: &SauceHeader) -> crate::Result<Self> {
+        if header.data_type != SauceDataType::Vector {
+            return Err(SauceError::UnsupportedDataType(header.data_type));
+        }
+        Ok(VectorCapabilities { format: VectorFormat::from_sauce(header.file_type) })
     }
 }
 

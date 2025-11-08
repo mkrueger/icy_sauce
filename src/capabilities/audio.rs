@@ -34,7 +34,7 @@
 //!     .unwrap()
 //!     .build();
 //! ```
-use crate::{SauceDataType, header::SauceHeader};
+use crate::{SauceDataType, SauceError, header::SauceHeader};
 
 /// Audio file format enumeration for SAUCE metadata.
 ///
@@ -479,7 +479,7 @@ impl AudioFormat {
 /// assert!(audio.format.is_16bit());
 /// assert!(audio.format.is_stereo());
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AudioCapabilities {
     /// Audio format (MOD, WAV, raw samples, etc.)
     pub format: AudioFormat,
@@ -513,29 +513,13 @@ impl AudioCapabilities {
     /// header.data_type = SauceDataType::Audio;
     /// header.file_type = 3; // S3M
     /// header.t_info1 = 44100;
-    /// let caps = AudioCapabilities::from(&header).unwrap();
+    /// use std::convert::TryFrom;
+    /// let caps = AudioCapabilities::try_from(&header).unwrap();
     /// assert_eq!(caps.format, AudioFormat::S3m);
     /// assert_eq!(caps.sample_rate, 44100);
     /// ```
-    pub(crate) fn from(header: &SauceHeader) -> crate::Result<Self> {
-        if header.data_type != SauceDataType::Audio {
-            return Err(crate::SauceError::UnsupportedDataType(header.data_type));
-        }
-
-        let format = AudioFormat::from_sauce(header.file_type);
-
-        // Only raw sample formats use TInfo1 for sample rate
-        let sample_rate = if format.has_sample_rate() {
-            header.t_info1
-        } else {
-            0
-        };
-
-        Ok(AudioCapabilities {
-            format,
-            sample_rate,
-        })
-    }
+    /// The bespoke internal `from(&SauceHeader)` has been replaced by a `TryFrom<&SauceHeader>`
+    /// implementation below.
 
     /// Serialize audio capabilities into a SAUCE header.
     ///
@@ -593,5 +577,17 @@ impl AudioCapabilities {
         header.t_info_s.clear();
 
         Ok(())
+    }
+}
+
+impl TryFrom<&SauceHeader> for AudioCapabilities {
+    type Error = SauceError;
+    fn try_from(header: &SauceHeader) -> crate::Result<Self> {
+        if header.data_type != SauceDataType::Audio {
+            return Err(SauceError::UnsupportedDataType(header.data_type));
+        }
+        let format = AudioFormat::from_sauce(header.file_type);
+        let sample_rate = if format.has_sample_rate() { header.t_info1 } else { 0 };
+        Ok(AudioCapabilities { format, sample_rate })
     }
 }

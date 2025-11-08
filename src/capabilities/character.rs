@@ -305,7 +305,7 @@ impl AspectRatio {
 /// assert_eq!(caps.columns, 80);
 /// assert_eq!(caps.lines, 25);
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CharacterCapabilities {
     /// The character encoding format
     pub format: CharacterFormat,
@@ -422,71 +422,6 @@ impl CharacterCapabilities {
         })
     }
 
-    pub(crate) fn from(header: &SauceHeader) -> crate::Result<Self> {
-        let format = CharacterFormat::from_sauce(header.file_type);
-        let columns;
-        let lines;
-        let mut ice_colors = false;
-        let mut letter_spacing = LetterSpacing::Legacy;
-        let mut aspect_ratio = AspectRatio::Legacy;
-        let mut font_opt = None;
-
-        match header.data_type {
-            SauceDataType::Character => {
-                // Check if format supports ANSi flags
-                if format.supports_ansi_flags() {
-                    columns = header.t_info1;
-                    lines = header.t_info2;
-                    ice_colors =
-                        (header.t_flags & ANSI_FLAG_NON_BLINK_MODE) == ANSI_FLAG_NON_BLINK_MODE;
-
-                    // Parse letter spacing
-                    letter_spacing = match header.t_flags & ANSI_MASK_LETTER_SPACING {
-                        ANSI_LETTER_SPACING_LEGACY => LetterSpacing::Legacy,
-                        ANSI_LETTER_SPACING_8PX => LetterSpacing::EightPixel,
-                        ANSI_LETTER_SPACING_9PX => LetterSpacing::NinePixel,
-                        _ => LetterSpacing::Reserved,
-                    };
-
-                    // Parse aspect ratio
-                    aspect_ratio = match header.t_flags & ANSI_MASK_ASPECT_RATIO {
-                        ANSI_ASPECT_RATIO_LEGACY => AspectRatio::Legacy,
-                        ANSI_ASPECT_RATIO_STRETCH => AspectRatio::LegacyDevice,
-                        ANSI_ASPECT_RATIO_SQUARE => AspectRatio::Square,
-                        _ => AspectRatio::Reserved,
-                    };
-
-                    font_opt = Some(header.t_info_s.clone());
-                } else if format == CharacterFormat::RipScript {
-                    // RipScript stores pixel dimensions, not character dimensions
-                    // Default character dimensions for RipScript
-                    columns = 80;
-                    lines = 25;
-                } else if format.has_dimensions() {
-                    // PCBoard, Avatar, TundraDraw
-                    columns = header.t_info1;
-                    lines = header.t_info2;
-                } else {
-                    // Html, Source - no dimensions
-                    columns = 0;
-                    lines = 0;
-                }
-            }
-            _ => {
-                return Err(SauceError::UnsupportedDataType(header.data_type));
-            }
-        }
-
-        Ok(CharacterCapabilities {
-            format,
-            columns,
-            lines,
-            ice_colors,
-            letter_spacing,
-            aspect_ratio,
-            font_opt,
-        })
-    }
 
     /// Get a reference to the optional font name.
     ///
@@ -558,6 +493,12 @@ impl CharacterCapabilities {
     /// ```
     pub fn remove_font(&mut self) {
         self.font_opt = None;
+    }
+
+    pub fn dimensions(mut self, columns: u16, lines: u16) -> Self {
+        self.columns = columns;
+        self.lines = lines;
+        self
     }
 
     /// Serialize these capabilities into a SAUCE header for file storage.
@@ -728,5 +669,54 @@ impl CharacterCapabilities {
             }
         }
         Ok(())
+    }
+}
+
+impl TryFrom<&SauceHeader> for CharacterCapabilities {
+    type Error = SauceError;
+    fn try_from(header: &SauceHeader) -> crate::Result<Self> {
+        let format = CharacterFormat::from_sauce(header.file_type);
+        if header.data_type != SauceDataType::Character {
+            return Err(SauceError::UnsupportedDataType(header.data_type));
+        }
+
+        let columns;
+        let lines;
+        let mut ice_colors = false;
+        let mut letter_spacing = LetterSpacing::Legacy;
+        let mut aspect_ratio = AspectRatio::Legacy;
+        let mut font_opt = None;
+
+        if format.supports_ansi_flags() {
+            columns = header.t_info1;
+            lines = header.t_info2;
+            ice_colors = (header.t_flags & ANSI_FLAG_NON_BLINK_MODE) == ANSI_FLAG_NON_BLINK_MODE;
+            letter_spacing = match header.t_flags & ANSI_MASK_LETTER_SPACING {
+                ANSI_LETTER_SPACING_LEGACY => LetterSpacing::Legacy,
+                ANSI_LETTER_SPACING_8PX => LetterSpacing::EightPixel,
+                ANSI_LETTER_SPACING_9PX => LetterSpacing::NinePixel,
+                _ => LetterSpacing::Reserved,
+            };
+            aspect_ratio = match header.t_flags & ANSI_MASK_ASPECT_RATIO {
+                ANSI_ASPECT_RATIO_LEGACY => AspectRatio::Legacy,
+                ANSI_ASPECT_RATIO_STRETCH => AspectRatio::LegacyDevice,
+                ANSI_ASPECT_RATIO_SQUARE => AspectRatio::Square,
+                _ => AspectRatio::Reserved,
+            };
+            font_opt = Some(header.t_info_s.clone());
+        } else if format == CharacterFormat::RipScript {
+            // RipScript fixed logical dimensions
+            columns = 80;
+            lines = 25;
+        } else if format.has_dimensions() {
+            columns = header.t_info1;
+            lines = header.t_info2;
+        } else {
+            // Html / Source or unknown with no dimensions stay at 0
+            columns = 0;
+            lines = 0;
+        }
+
+        Ok(CharacterCapabilities { format, columns, lines, ice_colors, letter_spacing, aspect_ratio, font_opt })
     }
 }

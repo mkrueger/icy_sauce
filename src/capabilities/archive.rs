@@ -205,7 +205,7 @@ impl ArchiveFormat {
 /// assert!(ArchiveFormat::Zip.is_compressed());
 /// assert!(!ArchiveFormat::Tar.is_compressed());
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ArchiveCapabilities {
     /// Archive format (ZIP, RAR, TAR, etc.)
     pub format: ArchiveFormat,
@@ -229,39 +229,6 @@ impl ArchiveCapabilities {
     /// ```
     pub fn new(format: ArchiveFormat) -> Self {
         ArchiveCapabilities { format }
-    }
-
-    /// Parse archive capabilities from SAUCE header.
-    ///
-    /// Extracts archive-specific metadata from a SAUCE header. Only valid when
-    /// header.data_type is Archive (11).
-    ///
-    /// # Arguments
-    ///
-    /// * `header` - SAUCE header to parse
-    ///
-    /// # Errors
-    ///
-    /// Returns [`SauceError::UnsupportedDataType`] if header.data_type is not Archive.
-    ///
-    /// # SAUCE Field Mapping
-    ///
-    /// * FileType → ArchiveFormat (0-9)
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// // Parsing from a raw header is an internal operation (pub(crate));
-    /// // use SauceRecord::read() for public parsing.
-    /// ```
-    pub(crate) fn from(header: &SauceHeader) -> crate::Result<Self> {
-        if header.data_type != SauceDataType::Archive {
-            return Err(SauceError::UnsupportedDataType(header.data_type));
-        }
-
-        let format = ArchiveFormat::from_sauce(header.file_type);
-
-        Ok(ArchiveCapabilities { format })
     }
 
     /// Write archive capabilities to SAUCE header.
@@ -306,5 +273,35 @@ impl ArchiveCapabilities {
         header.t_info_s.clear();
 
         Ok(())
+    }
+}
+
+impl TryFrom<&SauceHeader> for ArchiveCapabilities {
+    type Error = SauceError;
+
+    /// Attempt to construct `ArchiveCapabilities` from a SAUCE header reference.
+    ///
+    /// Fails if the header does not have `data_type == SauceDataType::Archive`.
+    ///
+    /// # Example
+    /// ```
+    /// use icy_sauce::{ArchiveFormat, ArchiveCapabilities};
+    /// use icy_sauce::header::SauceHeader;
+    ///
+    /// let mut header = SauceHeader::default();
+    /// header.data_type = icy_sauce::SauceDataType::Archive;
+    /// header.file_type = ArchiveFormat::Zip.to_sauce();
+    ///
+    /// let caps = ArchiveCapabilities::try_from(&header).unwrap();
+    /// assert_eq!(caps.format, ArchiveFormat::Zip);
+    /// ```
+    fn try_from(header: &SauceHeader) -> Result<Self, Self::Error> {
+        if header.data_type != SauceDataType::Archive {
+            return Err(SauceError::UnsupportedDataType(header.data_type));
+        }
+
+        let format = ArchiveFormat::from_sauce(header.file_type);
+
+        Ok(ArchiveCapabilities { format })
     }
 }

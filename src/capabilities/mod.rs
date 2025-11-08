@@ -106,7 +106,7 @@ pub use crate::vector::{VectorCapabilities, VectorFormat};
 /// # Conversion
 ///
 /// Each capability type can be converted to/from SAUCE header fields through
-/// their respective `from()` and `encode_into_header()` methods:
+/// their respective `TryFrom<&SauceHeader>` implementations and `encode_into_header()` methods:
 ///
 /// ```ignore
 /// // Internal conversion example (ignored because `from` and `encode_into_header` are not public)
@@ -116,7 +116,8 @@ pub use crate::vector::{VectorCapabilities, VectorFormat};
 /// // Parse from header
 /// let mut header = SauceHeader::default();
 /// header.data_type = SauceDataType::Character;
-/// let char_caps = CharacterCapabilities::from(&header).unwrap();
+/// use std::convert::TryFrom;
+/// let char_caps = CharacterCapabilities::try_from(&header).unwrap();
 /// let caps = Capabilities::Character(char_caps);
 ///
 /// // Write back to header
@@ -125,7 +126,7 @@ pub use crate::vector::{VectorCapabilities, VectorFormat};
 ///     _ => {}
 /// }
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Capabilities {
     /// Character/text format capabilities.
     ///

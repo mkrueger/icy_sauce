@@ -21,7 +21,7 @@ fn test_binary_text_height_calculation() {
         .build();
 
     let mut data = Vec::new();
-    info.write(&mut data, true).unwrap();
+    info.write(&mut data).unwrap();
     let parsed = SauceRecord::from_bytes(&data).unwrap().unwrap();
 
     // Extract BinCaps from the unified capabilities enum
@@ -64,7 +64,7 @@ fn test_binarytext_width_encoding() {
 
     // Access file_type through binary capabilities
     let mut data = Vec::new();
-    info.write(&mut data, true).unwrap();
+    info.write(&mut data).unwrap();
     let parsed = SauceRecord::from_bytes(&data).unwrap().unwrap();
 
     if let Some(Capabilities::Binary(bin_caps)) = parsed.capabilities() {
@@ -90,7 +90,7 @@ fn test_binary_text_font() {
         .build();
 
     let mut data = Vec::new();
-    info.write(&mut data, true).unwrap();
+    info.write(&mut data).unwrap();
     let parsed = SauceRecord::from_bytes(&data).unwrap().unwrap();
 
     if let Some(Capabilities::Binary(bin_caps)) = parsed.capabilities() {
@@ -116,7 +116,7 @@ fn test_binary_text_flags() {
         .build();
 
     let mut data = Vec::new();
-    info.write(&mut data, true).unwrap();
+    info.write(&mut data).unwrap();
     let parsed = SauceRecord::from_bytes(&data).unwrap().unwrap();
 
     if let Some(Capabilities::Binary(bin_caps)) = parsed.capabilities() {
@@ -170,7 +170,7 @@ fn test_xbin_roundtrip() {
             .build();
 
         let mut data = Vec::new();
-        info.write(&mut data, true).unwrap();
+        info.write(&mut data).unwrap();
         let parsed = SauceRecord::from_bytes(&data).unwrap().unwrap();
 
         if let Some(Capabilities::Binary(bin_caps)) = parsed.capabilities() {

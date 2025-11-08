@@ -1,9 +1,8 @@
 use std::fs;
 
 use bstr::BString;
-use chrono::NaiveDate;
 use icy_sauce::{
-    Capabilities, SauceDataType, SauceRecord, SauceRecordBuilder,
+    Capabilities, SauceDataType, SauceDate, SauceRecord, SauceRecordBuilder,
     binary::BinaryCapabilities,
     character::{AspectRatio, CharacterCapabilities, CharacterFormat, LetterSpacing},
 };
@@ -14,7 +13,7 @@ fn test_write1() {
     let info = SauceRecord::from_bytes(&file).unwrap().unwrap();
 
     let mut write_to = Vec::new();
-    info.write(&mut write_to, true).unwrap();
+    info.write(&mut write_to).unwrap();
     let info2 = SauceRecord::from_bytes(&write_to).unwrap().unwrap();
 
     assert_eq!(info.title(), info2.title());
@@ -28,7 +27,7 @@ fn test_write2() {
     let info = SauceRecord::from_bytes(&file).unwrap().unwrap();
 
     let mut write_to = Vec::new();
-    info.write(&mut write_to, true).unwrap();
+    info.write(&mut write_to).unwrap();
     let info2 = SauceRecord::from_bytes(&write_to).unwrap().unwrap();
 
     assert_eq!(info.title(), info2.title());
@@ -48,23 +47,20 @@ fn test_builder() {
         .unwrap()
         .group("Group".into())
         .unwrap()
-        .date(NaiveDate::from_ymd_opt(1976, 12, 30).unwrap())
+        .date(SauceDate::new(1976, 12, 30))
         .data_type(icy_sauce::SauceDataType::XBin)
         .capabilities(Capabilities::Binary(caps))
         .unwrap();
 
     let mut write_to = Vec::new();
-    builder.build().write(&mut write_to, true).unwrap();
+    builder.build().write(&mut write_to).unwrap();
     let info2 = SauceRecord::from_bytes(&write_to).unwrap().unwrap();
 
     assert_eq!(info2.title(), &BString::from("Title"));
     assert_eq!(info2.group(), &BString::from("Group"));
     assert_eq!(info2.author(), &BString::from("Author"));
     assert_eq!(info2.data_type(), icy_sauce::SauceDataType::XBin);
-    assert_eq!(
-        info2.date().unwrap(),
-        NaiveDate::from_ymd_opt(1976, 12, 30).unwrap()
-    );
+    assert_eq!(info2.date(), SauceDate::new(1976, 12, 30));
 
     // Use the unified capabilities method
     if let Some(Capabilities::Binary(caps)) = info2.capabilities() {
@@ -90,7 +86,7 @@ fn test_build_comments() {
         .unwrap();
 
     let mut write_to = Vec::new();
-    builder.build().write(&mut write_to, true).unwrap();
+    builder.build().write(&mut write_to).unwrap();
     let info2 = SauceRecord::from_bytes(&write_to).unwrap().unwrap();
 
     assert_eq!(info2.title(), &BString::from("Title"));
@@ -102,43 +98,6 @@ fn test_build_comments() {
         info2.comments()[1],
         BString::from("This is another comment")
     );
-}
-
-#[test]
-fn test_sauce_trim() {
-    let data = b"Hello World  ";
-    assert_eq!(sauce_trim(data), BString::from("Hello World"));
-    let data = b"Hello World\0\0";
-    assert_eq!(sauce_trim(data), BString::from("Hello World"));
-
-    let data = b"Hello World\t\0";
-    assert_eq!(sauce_trim(data), BString::from("Hello World\t"));
-    let data = b"Hello World\n ";
-    assert_eq!(sauce_trim(data), BString::from("Hello World\n"));
-    let data = b"    \0   ";
-    assert_eq!(sauce_trim(data), BString::from(""));
-}
-
-#[test]
-fn test_sauce_pad() {
-    let data = BString::from(b"Hello World");
-    assert_eq!(sauce_pad(&data, 15), b"Hello World    ");
-
-    let data = BString::from(b"Hello World");
-    assert_eq!(sauce_pad(&data, 5), b"Hello");
-
-    let data = BString::from(b"");
-    assert_eq!(sauce_pad(&data, 1), b" ");
-}
-
-#[test]
-fn test_zero_trim() {
-    let data = b"FONT NAME   \0\0\0"; // keep trailing spaces before zeros
-    assert_eq!(zero_trim(data), BString::from("FONT NAME   "));
-    let data = b"ABC";
-    assert_eq!(zero_trim(data), BString::from("ABC"));
-    let data = b"ABC\0DEF\0"; // internal zeros preserved
-    assert_eq!(zero_trim(data), BString::from(b"ABC\0DEF".to_vec()));
 }
 
 #[test]
@@ -172,7 +131,7 @@ fn test_letter_spacing_aspect_ratio_roundtrip() {
                 .build();
 
             let mut data = Vec::new();
-            info.write(&mut data, true).unwrap();
+            info.write(&mut data).unwrap();
             let parsed = SauceRecord::from_bytes(&data).unwrap().unwrap();
 
             // Use the unified capabilities method
@@ -199,44 +158,33 @@ fn test_letter_spacing_aspect_ratio_roundtrip() {
     }
 }
 
-/// Trims the trailing whitespace and null bytes from the data.
-/// This is sauce specific - no other thing than space should be trimmed, however some implementations use null bytes instead of spaces.
-pub(crate) fn sauce_trim(data: &[u8]) -> BString {
-    let end = sauce_len_rev(data);
-    BString::new(data[..end].to_vec())
-}
 
-/// Pads trailing whitespaces or cut too long data.
-pub(crate) fn sauce_pad(str: &BString, len: usize) -> Vec<u8> {
-    let mut data = str.to_vec();
-    data.resize(len, b' ');
-    data
-}
+use proptest::proptest;
+use proptest::collection::vec;
 
-/// Pads trailing \0 or cut too long data.
-pub(crate) fn _zero_pad(str: &BString, len: usize) -> Vec<u8> {
-    let mut data = str.to_vec();
-    data.resize(len, 0);
-    data
-}
-
-/// Trim only trailing zero bytes (binary zero padding) – for zero padded fields like TInfoS.
-pub(crate) fn zero_trim(data: &[u8]) -> BString {
-    let mut end = data.len();
-    while end > 0 && data[end - 1] == 0 {
-        end -= 1;
+proptest! {
+    #[test]
+    fn round_trip_character(
+        // Generate byte vectors directly to ensure exact length control
+        title_bytes in vec(0x21u8..=0xFE, 0..=35),  // CP437 printable range
+        author_bytes in vec(0x21u8..=0xFE, 0..=20),
+        width in 1u16..200,
+        height in 1u16..200
+    ) {
+        let caps = CharacterCapabilities::new(CharacterFormat::Ansi)
+            .dimensions(width, height);
+        let record = SauceRecordBuilder::default()
+            .title(BString::from(title_bytes))?
+            .author(BString::from(author_bytes))?
+            .capabilities(Capabilities::Character(caps))?
+            .build();
+        
+        let mut buf = Vec::new();
+        record.write(&mut buf)?;
+        let parsed = SauceRecord::from_bytes(&buf)?.unwrap();
+        
+        assert_eq!(parsed.title(), record.title());
+        assert_eq!(parsed.author(), record.author());
+        assert_eq!(parsed.capabilities(), record.capabilities());
     }
-    BString::new(data[..end].to_vec())
-}
-
-fn sauce_len_rev(data: &[u8]) -> usize {
-    let mut end = data.len();
-    while end > 0 {
-        let b = data[end - 1];
-        if b != 0 && b != b' ' {
-            break;
-        }
-        end -= 1;
-    }
-    end
 }

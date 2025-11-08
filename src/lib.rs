@@ -17,14 +17,9 @@ pub use metadata::*;
 pub mod builder;
 pub use builder::*;
 
-pub mod limits {
-    pub const MAX_TITLE_LENGTH: usize = 35;
-    pub const MAX_AUTHOR_LENGTH: usize = 20;
-    pub const MAX_GROUP_LENGTH: usize = 20;
-    pub const MAX_COMMENT_LENGTH: usize = 64;
-    pub const MAX_COMMENTS: usize = 255;
-    pub const DATE_LENGTH: usize = 8;
-}
+mod date;
+pub use date::*;
+pub mod limits;
 
 #[derive(Error, Debug)]
 pub enum SauceError {
@@ -66,6 +61,13 @@ pub enum SauceError {
 
     #[error("Missing EOF marker (0x1A) before SAUCE record")]
     MissingEofMarker,
+}
+
+impl From<std::io::Error> for SauceError {
+    #[inline]
+    fn from(err: std::io::Error) -> Self {
+        SauceError::IoError(err)
+    }
 }
 
 #[repr(u8)]
@@ -146,23 +148,16 @@ impl From<SauceDataType> for u8 {
     }
 }
 
-/// Trims the trailing whitespace and null bytes from the data.
-/// This is sauce specific - no other thing than space should be trimmed, however some implementations use null bytes instead of spaces.
-pub(crate) fn sauce_trim(data: &[u8]) -> BString {
-    let end = sauce_len_rev(data);
-    BString::new(data[..end].to_vec())
-}
-
-fn sauce_len_rev(data: &[u8]) -> usize {
-    let mut end = data.len();
+pub(crate) fn trim_spaces(buf: &[u8]) -> bstr::BString {
+    let mut end = buf.len();
     while end > 0 {
-        let b = data[end - 1];
-        if b != 0 && b != b' ' {
+        let b = buf[end - 1];
+        if b != b' ' && b != 0 {
             break;
         }
         end -= 1;
     }
-    end
+    bstr::BString::from(&buf[..end])
 }
 
 /// Pads trailing whitespaces or cut too long data.

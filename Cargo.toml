@@ -12,11 +12,17 @@ keywords = ["ansi", "ansiart", "sauce"]
 [dependencies]
 thiserror = "2.0.17"
 bstr = "1.12.1"
-chrono = "0.4.42"
 log = "0.4.28"
+chrono = { version = "0.4.38", optional = true, default-features = false }
+
+[features]
+# Default stays lean; users can opt into faster trimming.
+default = []
+chrono = ["dep:chrono"]  # feature enabling chrono integration
 
 [dev-dependencies]
 clap = { version = "4.0", features = ["derive"] }
+proptest = "1.0"
 
 [[example]]
 name = "print_sauce"

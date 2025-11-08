@@ -7,10 +7,9 @@
 //! # Example
 //!
 //! ```no_run
-//! use icy_sauce::{SauceRecordBuilder, SauceDataType, Capabilities};
+//! use icy_sauce::{SauceRecordBuilder, SauceDataType, Capabilities, SauceDate};
 //! use icy_sauce::{CharacterCapabilities, CharacterFormat, LetterSpacing, AspectRatio};
 //! use bstr::BString;
-//! use chrono::Local;
 //!
 //! let char_caps = CharacterCapabilities::with_font(
 //!     CharacterFormat::Ansi,
@@ -25,7 +24,7 @@
 //!     .title(BString::from("My ANSI Art")).unwrap()
 //!     .author(BString::from("Artist Name")).unwrap()
 //!     .group(BString::from("Art Group")).unwrap()
-//!     .date(Local::now().naive_local().date())
+//!     .date(SauceDate::new(2025, 11, 8))
 //!     .data_type(SauceDataType::Character)
 //!     .capabilities(Capabilities::Character(char_caps)).unwrap()
 //!     .add_comment(BString::from("Created with passion")).unwrap()
@@ -33,11 +32,10 @@
 //! ```
 
 use bstr::BString;
-use chrono::NaiveDate;
 
 use crate::{
-    COMMENT_LEN, Capabilities, MetaData, SauceDataType, SauceError,
-    header::{AUTHOR_GROUP_LEN, SauceHeader, TITLE_LEN},
+    COMMENT_LEN, Capabilities, MetaData, SauceDataType, SauceDate, SauceError, header::SauceHeader,
+    limits,
 };
 
 /// Builder for constructing SAUCE metadata records with validation.
@@ -99,7 +97,7 @@ impl SauceRecordBuilder {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn title(mut self, title: BString) -> crate::Result<Self> {
-        if title.len() > TITLE_LEN {
+        if title.len() > limits::MAX_TITLE_LENGTH {
             return Err(SauceError::TitleTooLong(title.len()));
         }
         self.header.title = title;
@@ -126,7 +124,7 @@ impl SauceRecordBuilder {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn author(mut self, author: BString) -> crate::Result<Self> {
-        if author.len() > AUTHOR_GROUP_LEN {
+        if author.len() > limits::MAX_AUTHOR_LENGTH {
             return Err(SauceError::AuthorTooLong(author.len()));
         }
         self.header.author = author;
@@ -153,7 +151,7 @@ impl SauceRecordBuilder {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn group(mut self, group: BString) -> crate::Result<Self> {
-        if group.len() > AUTHOR_GROUP_LEN {
+        if group.len() > limits::MAX_GROUP_LENGTH {
             return Err(SauceError::GroupTooLong(group.len()));
         }
         self.header.group = group;
@@ -171,14 +169,13 @@ impl SauceRecordBuilder {
     /// # Example
     ///
     /// ```
-    /// # use icy_sauce::SauceRecordBuilder;
-    /// # use chrono::NaiveDate;
-    /// let date = NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+    /// # use icy_sauce::{SauceRecordBuilder, SauceDate};
+    /// let date = SauceDate::new(2024, 1, 15);
     /// let builder = SauceRecordBuilder::default()
     ///     .date(date);
     /// ```
-    pub fn date(mut self, date: NaiveDate) -> Self {
-        self.header.date = date.format("%Y%m%d").to_string().into();
+    pub fn date(mut self, date: SauceDate) -> Self {
+        self.header.date = date;
         self
     }
 
@@ -342,14 +339,13 @@ impl SauceRecordBuilder {
     /// # Example
     ///
     /// ```
-    /// # use icy_sauce::{SauceRecordBuilder, SauceDataType};
+    /// # use icy_sauce::{SauceRecordBuilder, SauceDataType, SauceDate};
     /// # use bstr::BString;
-    /// # use chrono::Local;
     /// let sauce = SauceRecordBuilder::default()
     ///     .title(BString::from("My Art")).unwrap()
     ///     .author(BString::from("Me")).unwrap()
     ///     .group(BString::from("Group")).unwrap()
-    ///     .date(Local::now().naive_local().date())
+    ///     .date(SauceDate::new(2025, 11, 8))
     ///     .data_type(SauceDataType::Character)
     ///     .build();
     ///
@@ -361,6 +357,7 @@ impl SauceRecordBuilder {
         crate::SauceRecord {
             header: self.header,
             comments: self.comments,
+            cached_caps: std::cell::OnceCell::new(),
         }
     }
 }

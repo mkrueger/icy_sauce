@@ -33,11 +33,15 @@
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 
-use bstr::{BString, ByteSlice};
-use chrono::NaiveDate;
+use std::{
+    cell::OnceCell, fs::File, io::{Read, Seek, SeekFrom, Write}
+};
+
+use bstr::BString;
 
 use crate::{
-    Capabilities, MetaData, SauceDataType, SauceError, SauceRecordBuilder, VectorCapabilities,
+    Capabilities, MetaData, SauceDataType, SauceDate, SauceError, SauceRecordBuilder,
+    VectorCapabilities,
     archive::ArchiveCapabilities,
     audio::AudioCapabilities,
     binary::BinaryCapabilities,
@@ -45,7 +49,7 @@ use crate::{
     character::CharacterCapabilities,
     executable::ExecutableCapabilities,
     header::{HDR_LEN, SauceHeader},
-    sauce_pad, sauce_trim,
+    sauce_pad, trim_spaces,
 };
 
 pub(crate) const COMMENT_LEN: usize = 64;
@@ -56,13 +60,27 @@ const COMMENT_ID: [u8; COMMENT_ID_LEN] = *b"COMNT";
 /// This is the main structure for SAUCE.
 ///
 /// SAUCE metadata consits of a header and optional comments.
-#[derive(Clone, PartialEq)]
+#[derive(PartialEq)]
 pub struct SauceRecord {
     pub(crate) header: SauceHeader,
 
     /// Up to 255 comments, each 64 bytes long max.
     pub(crate) comments: Vec<BString>,
+
+    pub(crate) cached_caps: OnceCell<Option<Capabilities>>,
 }
+
+// Custom Clone impl that resets cache
+impl Clone for SauceRecord {
+    fn clone(&self) -> Self {
+        Self {
+            header: self.header.clone(),
+            comments: self.comments.clone(),
+            cached_caps: OnceCell::new(), // fresh cache
+        }
+    }
+}
+
 
 impl SauceRecord {
     pub fn from_bytes(data: &[u8]) -> crate::Result<Option<Self>> {
@@ -83,7 +101,7 @@ impl SauceRecord {
             } else {
                 cdata = &cdata[COMMENT_ID_LEN..];
                 for _ in 0..header.comments {
-                    comments.push(sauce_trim(&cdata[..COMMENT_LEN]));
+                    comments.push(trim_spaces(&cdata[..COMMENT_LEN]));
                     cdata = &cdata[COMMENT_LEN..];
                 }
             }
@@ -105,47 +123,35 @@ impl SauceRecord {
             }
         }
 
-        Ok(Some(SauceRecord { header, comments }))
+        Ok(Some(SauceRecord { header, comments, cached_caps: OnceCell::new() }))
     }
 
-    /// Write the SAUCE record to a writer.
-    ///
-    /// Serializes the complete SAUCE information including the header and any comment blocks
-    /// to the provided writer. The data is written in the following order:
-    ///
-    /// 1. Optional comment block (if comments exist)
-    /// 2. SAUCE header (128 bytes)
-    ///
-    /// # Arguments
-    ///
-    /// * `writer` - The writer to serialize the SAUCE data to
-    ///
-    /// # Errors
-    ///
-    /// Returns [`SauceError::IoError`] if writing fails.
-    ///
-    /// # Notes
-    ///
-    /// - Comments are automatically padded to 64 bytes each
-    /// - The header fields are padded according to spec (spaces or zeros)
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use icy_sauce::SauceRecordBuilder;
-    /// use bstr::BString;
-    ///
-    /// let sauce = SauceRecordBuilder::default()
-    ///     .title(BString::from("My Art")).unwrap()
-    ///     .build();
-    ///
-    /// let mut buffer = Vec::new();
-    /// sauce.write(&mut buffer).unwrap();
-    /// assert!(buffer.len() >= 128); // At least the header
-    /// ```
-    pub fn write<A: std::io::Write>(&self, writer: &mut A, append_eof: bool) -> crate::Result<()> {
+    pub fn from_path(path: &std::path::Path) -> crate::Result<Option<Self>> {
+        const MAX_SAUCE_WINDOW: u64 = 128 + 5 + 255 * 64 + 1;
+        let mut f = File::open(path).map_err(crate::SauceError::IoError)?;
+        let file_len = f.metadata().map_err(crate::SauceError::IoError)?.len();
+        let read_len = MAX_SAUCE_WINDOW.min(file_len);
+        f.seek(SeekFrom::End(-(read_len as i64)))
+            .map_err(crate::SauceError::IoError)?;
+        let mut buf = vec![0u8; read_len as usize];
+        f.read_exact(&mut buf).map_err(crate::SauceError::IoError)?;
+        // Reuse existing logic
+        Self::from_bytes(&buf)
+    }
+
+     /// Write SAUCE with EOF marker (standard format).
+    pub fn write<W: Write>(&self, writer: &mut W) -> crate::Result<()> {
+        self.write_internal(writer, true)
+    }
+    
+    /// Write SAUCE without EOF marker (for special cases).
+    pub fn write_without_eof<W: Write>(&self, writer: &mut W) -> crate::Result<()> {
+        self.write_internal(writer, false)
+    }
+    
+    fn write_internal<W: Write>(&self, writer: &mut W, eof: bool) -> crate::Result<()> {
         // EOF Char.
-        if append_eof {
+        if eof {
             if let Err(err) = writer.write_all(&[0x1A]) {
                 return Err(SauceError::IoError(err));
             }
@@ -187,7 +193,7 @@ impl SauceRecord {
     /// let sauce = SauceRecordBuilder::default()
     ///     .add_comment(BString::from("Test")).unwrap()
     ///     .build();
-    /// assert_eq!(sauce.record_len(), 129 + 5 + 64); // header + EOF + COMNT + 1 comment
+    /// assert_eq!(sauce.record_len(), 128 + 5 + 64); // header + COMNT + 1 comment
     /// ```
     pub fn record_len(&self) -> usize {
         if self.comments.is_empty() {
@@ -325,20 +331,16 @@ impl SauceRecord {
     /// # Example
     ///
     /// ```
-    /// use icy_sauce::SauceRecordBuilder;
-    /// use chrono::{NaiveDate, Datelike};
+    /// use icy_sauce::{SauceRecordBuilder, SauceDate};
     ///
     /// let sauce = SauceRecordBuilder::default()
-    ///     .date(NaiveDate::from_ymd_opt(2024, 1, 15).unwrap())
+    ///     .date(SauceDate::new(2024, 1, 15))
     ///     .build();
-    /// let date = sauce.date().unwrap();
-    /// assert_eq!(date.year(), 2024);
+    /// let date = sauce.date();
+    /// assert_eq!(date.year, 2024);
     /// ```
-    pub fn date(&self) -> crate::Result<NaiveDate> {
-        match NaiveDate::parse_from_str(&self.header.date.to_str_lossy(), "%Y%m%d") {
-            Ok(d) => Ok(d),
-            Err(_) => Err(SauceError::UnsupportedSauceDate(self.header.date.clone())),
-        }
+    pub fn date(&self) -> SauceDate {
+        self.header.date.clone()
     }
 
     /// Get format-specific capabilities.
@@ -366,39 +368,33 @@ impl SauceRecord {
     /// }
     /// ```
     pub fn capabilities(&self) -> Option<Capabilities> {
-        match self.header.data_type {
-            SauceDataType::Character => match CharacterCapabilities::from(&self.header) {
-                Ok(caps) => Some(Capabilities::Character(caps)),
-                Err(_) => None,
-            },
-            SauceDataType::BinaryText | SauceDataType::XBin => {
-                match BinaryCapabilities::from(&self.header) {
-                    Ok(caps) => Some(Capabilities::Binary(caps)),
-                    Err(_) => None,
+         self.cached_caps
+            .get_or_init(|| {
+                match self.header.data_type {
+                    SauceDataType::Character => CharacterCapabilities::try_from(&self.header)
+                        .ok()
+                        .map(Capabilities::Character),
+                    SauceDataType::BinaryText | SauceDataType::XBin =>
+                        BinaryCapabilities::try_from(&self.header).ok().map(Capabilities::Binary),
+                    SauceDataType::Bitmap => BitmapCapabilities::try_from(&self.header)
+                        .ok()
+                        .map(Capabilities::Bitmap),
+                    SauceDataType::Vector => VectorCapabilities::try_from(&self.header)
+                        .ok()
+                        .map(Capabilities::Vector),
+                    SauceDataType::Audio => AudioCapabilities::try_from(&self.header)
+                        .ok()
+                        .map(Capabilities::Audio),
+                    SauceDataType::Archive => ArchiveCapabilities::try_from(&self.header)
+                        .ok()
+                        .map(Capabilities::Archive),
+                    SauceDataType::Executable => ExecutableCapabilities::try_from(&self.header)
+                        .ok()
+                        .map(Capabilities::Executable),
+                    _ => None,
                 }
-            }
-            SauceDataType::Bitmap => match BitmapCapabilities::from(&self.header) {
-                Ok(caps) => Some(Capabilities::Bitmap(caps)),
-                Err(_) => None,
-            },
-            SauceDataType::Vector => match VectorCapabilities::from(&self.header) {
-                Ok(caps) => Some(Capabilities::Vector(caps)),
-                Err(_) => None,
-            },
-            SauceDataType::Audio => match AudioCapabilities::from(&self.header) {
-                Ok(caps) => Some(Capabilities::Audio(caps)),
-                Err(_) => None,
-            },
-            SauceDataType::Archive => match ArchiveCapabilities::from(&self.header) {
-                Ok(caps) => Some(Capabilities::Archive(caps)),
-                Err(_) => None,
-            },
-            SauceDataType::Executable => match ExecutableCapabilities::from(&self.header) {
-                Ok(caps) => Some(Capabilities::Executable(caps)),
-                Err(_) => None,
-            },
-            _ => None,
-        }
+            })
+            .clone()
     }
 
     /// Extract basic metadata information.

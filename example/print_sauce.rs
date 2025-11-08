@@ -61,10 +61,7 @@ fn main() {
     }
 
     // Handle date which returns Result
-    match sauce.date() {
-        Ok(date) => println!("Date:     {}", date),
-        Err(_) => println!("Date:     <invalid>"),
-    }
+    println!("Date:     {}", sauce.date());
 
     println!("Type:     {}", sauce.data_type());
 

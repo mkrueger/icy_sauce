@@ -29,7 +29,7 @@ fn test_comments_without_valid_id() {
         .build();
 
     let mut data = Vec::new();
-    info.write(&mut data, true).unwrap();
+    info.write(&mut data).unwrap();
 
     // Corrupt the comment ID
     let comment_id_pos = data.len() - 128 - 64 - 5;
