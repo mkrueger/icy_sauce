@@ -41,7 +41,7 @@ icy_sauce = "0.3.0"
 ### Reading SAUCE
 
 ```rust
-use icy_sauce::SauceRecord;
+use icy_sauce::prelude::*; // brings common types into scope
 use std::fs;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -53,16 +53,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("Group: {}", sauce.group());
         
         // Get format-specific information
-        if let Some(caps) = sauce.capabilities() {
+        if let Some(caps) = sauce.capabilities() { // cached internally
             match caps {
-                icy_sauce::Capabilities::Character(char_caps) => {
-                    println!("Format: {:?}", char_caps.format);
-                    println!("Width: {} columns", char_caps.columns);
-                    println!("Height: {} rows", char_caps.lines);
+                Capabilities::Character(c) => {
+                    println!("Character format: {:?} ({}x{})", c.format, c.columns, c.lines);
                 }
-                icy_sauce::Capabilities::Graphics(bitmap_caps) => {
-                    println!("Format: {:?}", bitmap_caps.format);
-                    println!("Dimensions: {}x{}", bitmap_caps.width, bitmap_caps.height);
+                Capabilities::Bitmap(b) => {
+                    println!("Bitmap: {:?} ({}x{} @ {}bpp)", b.format, b.width, b.height, b.pixel_depth);
+                }
+                Capabilities::Vector(v) => {
+                    println!("Vector: {:?}", v.format);
                 }
                 _ => {}
             }
@@ -76,27 +76,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ### Writing SAUCE
 
 ```rust
-use icy_sauce::{SauceRecordBuilder, SauceDataType, CharacterCapabilities, CharacterFormat};
-use icy_sauce::character::{LetterSpacing, AspectRatio};
+use icy_sauce::prelude::*;
 use bstr::BString;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Create character capabilities for an 80x25 ANSI file
-    let caps = CharacterCapabilities::new(CharacterFormat::Ansi)
-        .with_dimensions(80, 25)
-        .with_ice_colors(false)
-        .with_flags(LetterSpacing::EightPixel, AspectRatio::Square)
-        .with_font(BString::from("IBM VGA"));
-    
+    // Create character capabilities for an 80x25 ANSI file (builder-style mutating methods retained)
+    let mut caps = CharacterCapabilities::new(CharacterFormat::Ansi)
+        .dimensions(80, 25);
+    caps.set_font(BString::from("IBM VGA"))?;
+
     let sauce = SauceRecordBuilder::default()
-        .with_title(BString::from("My Artwork"))?
-        .with_author(BString::from("Artist"))?
-        .with_group(BString::from("Art Group"))?
-        .with_date(chrono::NaiveDate::from_ymd_opt(2024, 1, 15).unwrap())
-        .with_capabilities(icy_sauce::Capabilities::Character(caps))
+        .title(BString::from("My Artwork"))?
+        .author(BString::from("Artist"))?
+        .group(BString::from("Art Group"))?
+        .date(SauceDate::new(2024, 1, 15))
+        .capabilities(Capabilities::Character(caps))?
         .add_comment(BString::from("Created with love"))?
-        .build()?;
-    
+        .build();
+
     // Write to file with content
     let mut output = Vec::new();
     output.extend_from_slice(b"Your file content here...");
@@ -191,15 +188,15 @@ Comments (2):
 ### Working with Comments
 
 ```rust
-use icy_sauce::SauceRecordBuilder;
+use icy_sauce::prelude::*;
 use bstr::BString;
 
 let sauce = SauceRecordBuilder::default()
-    .with_title(BString::from("Art"))? 
+    .title(BString::from("Art"))? 
     .add_comment(BString::from("First comment"))?
     .add_comment(BString::from("Second comment"))?
     .add_comment(BString::from("Up to 255 comments allowed"))?
-    .build()?;
+    .build();
 
 // Read comments
 for comment in sauce.comments() {
@@ -210,42 +207,41 @@ for comment in sauce.comments() {
 ### Binary Text Files
 
 ```rust
-use icy_sauce::{BinaryCapabilities, BinaryFormat};
-use icy_sauce::character::{LetterSpacing, AspectRatio};
+use icy_sauce::prelude::*;
 
 // For .BIN files with specific width
 let caps = BinaryCapabilities::binary_text(160)?  // 160 columns (must be even)
-    .with_flags(true, LetterSpacing::NinePixel, AspectRatio::Legacy);
+    .flags(true, LetterSpacing::NinePixel, AspectRatio::Legacy);
 
 // For XBin files with explicit dimensions
 let caps = BinaryCapabilities::xbin(80, 50)?;
 ```
 
-### Graphics Files
+### Bitmap & Vector Graphics
 
 ```rust
-use icy_sauce::{BitmapCapabilities, BitmapFormat};
+use icy_sauce::prelude::*;
 
-let caps = BitmapCapabilities::new(BitmapFormat::Png)
-    .with_dimensions(640, 480)
-    .with_pixel_depth(24);
+let mut caps = BitmapCapabilities::new(BitmapFormat::Png);
+caps.width = 640;
+caps.height = 480;
+caps.pixel_depth = 24;
 ```
 
 ### Audio Files
 
 ```rust
-use icy_sauce::{AudioCapabilities, AudioFormat};
+use icy_sauce::prelude::*;
 
-let caps = AudioCapabilities::new(AudioFormat::S3m)
-    .with_sample_rate(44100);
+let caps = AudioCapabilities { format: AudioFormat::S3m, sample_rate: 0 }; // tracker formats ignore sample_rate
 ```
 
 ### Archive Files
 
 ```rust
-use icy_sauce::{ArchiveCapabilities, ArchiveFormat};
+use icy_sauce::prelude::*;
 
-let caps = ArchiveCapabilities::new(ArchiveFormat::Zip);
+let caps = ArchiveCapabilities { format: ArchiveFormat::Zip };
 ```
 
 ## String Encoding
@@ -285,26 +281,20 @@ match sauce_result {
 Each file type has its own strongly-typed capability structure, ensuring you can only set valid metadata:
 
 ```rust
-use icy_sauce::{Capabilities, CharacterCapabilities, CharacterFormat};
+use icy_sauce::prelude::*;
 
 // Character files have dimensions and font settings
-let char_caps = CharacterCapabilities::new(CharacterFormat::Ansi)
-    .with_dimensions(80, 25);
+let char_caps = CharacterCapabilities::new(CharacterFormat::Ansi).dimensions(80, 25);
 
 // Convert to general capabilities
 let caps = Capabilities::Character(char_caps);
 
 // Pattern match to access specific capabilities
 match caps {
-    Capabilities::Character(c) => {
-        println!("Character format with {} columns", c.columns);
-    }
-    Capabilities::Graphics(b) => {
-        println!("Bitmap format: {:?}", b.format);
-    }
-    Capabilities::Audio(a) => {
-        println!("Audio format: {:?}", a.format);
-    }
+    Capabilities::Character(c) => println!("Character format with {} columns", c.columns),
+    Capabilities::Bitmap(b) => println!("Bitmap format: {:?}", b.format),
+    Capabilities::Vector(v) => println!("Vector format: {:?}", v.format),
+    Capabilities::Audio(a) => println!("Audio format: {:?}", a.format),
     _ => {}
 }
 ```
