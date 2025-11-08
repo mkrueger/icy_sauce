@@ -33,7 +33,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-icy_sauce = "0.3.0"
+icy_sauce = "0.3.2"
 ```
 
 ## Basic Usage
