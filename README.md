@@ -53,13 +53,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("Group: {}", sauce.group());
         
         // Get format-specific information
-        if let Some(caps) = sauce.capabilities() { // cached internally
+        if let Some(caps) = sauce.capabilities() {
             match caps {
                 Capabilities::Character(c) => {
                     println!("Character format: {:?} ({}x{})", c.format, c.columns, c.lines);
                 }
                 Capabilities::Bitmap(b) => {
                     println!("Bitmap: {:?} ({}x{} @ {}bpp)", b.format, b.width, b.height, b.pixel_depth);
+                }
+                Capabilities::Binary(b) => {
+                    match b.format {
+                        BinaryFormat::BinaryText => {
+                            println!("BinaryText width: {}", b.columns);
+                            if let Some(h) = b.binary_text_height_from_file_size(sauce.file_size()) {
+                                println!("Derived height: {}", h);
+                            }
+                            println!("ICE colors: {}", b.ice_colors);
+                            println!("Letter spacing: {:?}", b.letter_spacing);
+                            println!("Aspect ratio: {:?}", b.aspect_ratio);
+                            if let Some(font) = b.font() {
+                                println!("Font: {}", font.to_str_lossy());
+                            }
+                        }
+                        BinaryFormat::XBin => {
+                            println!("XBin dimensions: {}x{}", b.columns, b.lines);
+                        }
+                    }
                 }
                 Capabilities::Vector(v) => {
                     println!("Vector: {:?}", v.format);
@@ -80,7 +99,7 @@ use icy_sauce::prelude::*;
 use bstr::BString;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Create character capabilities for an 80x25 ANSI file (builder-style mutating methods retained)
+    // Create character capabilities for an 80x25 ANSI file
     let mut caps = CharacterCapabilities::new(CharacterFormat::Ansi)
         .dimensions(80, 25);
     caps.set_font(BString::from("IBM VGA"))?;
@@ -110,35 +129,22 @@ This library includes a command-line utility for inspecting SAUCE records in fil
 ### Installation
 
 ```bash
-# Run directly from the repository
 cargo run --example print_sauce <FILE>
-
-# Or install it locally
 cargo install --path . --example print_sauce
 ```
 
 ### Usage
 
 ```bash
-# Basic usage - show SAUCE information
 cargo run --example print_sauce artwork.ans
-
-# Show comments
 cargo run --example print_sauce artwork.ans --comments
-cargo run --example print_sauce artwork.ans -c
-
-# Show raw technical details
 cargo run --example print_sauce artwork.ans --raw
-cargo run --example print_sauce artwork.ans -r
-
-# Show everything
 cargo run --example print_sauce artwork.ans -c -r
 ```
 
 ### Example Output
 
 ```
-$ cargo run --example print_sauce demo.ans --comments
 SAUCE Information for 'demo.ans'
 ============================================================
 Title:    Winter Scene
@@ -148,12 +154,12 @@ Date:     2024-01-15
 Type:     Character
 
 Character File Information:
-  Format:     Ansi
-  Dimensions: 80x25 (columns x rows)
-  iCE Colors: Yes
+  Format:        Ansi
+  Dimensions:    80x25
+  iCE Colors:    Yes
   Letter Spacing: NinePixel
   Aspect Ratio:   Legacy
-  Font:       IBM VGA
+  Font:          IBM VGA
 
 Comments (2):
 ----------------------------------------
@@ -173,11 +179,11 @@ Comments (2):
 - **Vector**: DXF, DWG, WPG, 3DS
 
 ### Binary Text
-- BinaryText (.BIN files)
-- XBin (extended BIN)
+- BinaryText (.BIN files) – even width (2–510), height derived from file size
+- XBin – explicit width & height (u16), no font or rendering flags
 
 ### Audio Files
-- Tracker formats: MOD, 669, STM, S3M, MTM, FAR, ULT, AMF, DMF, OKT, XM, IT
+- Tracker: MOD, 669, STM, S3M, MTM, FAR, ULT, AMF, DMF, OKT, XM, IT
 - Other: ROL, CMF, MIDI, VOC, WAV, SMP
 
 ### Archives
@@ -192,13 +198,11 @@ use icy_sauce::prelude::*;
 use bstr::BString;
 
 let sauce = SauceRecordBuilder::default()
-    .title(BString::from("Art"))? 
+    .title(BString::from("Art"))?
     .add_comment(BString::from("First comment"))?
     .add_comment(BString::from("Second comment"))?
-    .add_comment(BString::from("Up to 255 comments allowed"))?
     .build();
 
-// Read comments
 for comment in sauce.comments() {
     println!("Comment: {}", comment);
 }
@@ -208,13 +212,25 @@ for comment in sauce.comments() {
 
 ```rust
 use icy_sauce::prelude::*;
+use bstr::BString;
+use icy_sauce::{LetterSpacing, AspectRatio};
 
-// For .BIN files with specific width
-let caps = BinaryCapabilities::binary_text(160)?  // 160 columns (must be even)
-    .flags(true, LetterSpacing::NinePixel, AspectRatio::Legacy);
+// BinaryText (width must be even; height can be derived from file size)
+let mut bin_caps = BinaryCapabilities::binary_text(160)?; // 160 columns
+bin_caps.ice_colors = true;
+bin_caps.letter_spacing = LetterSpacing::NinePixel;
+bin_caps.aspect_ratio = AspectRatio::Legacy;
+bin_caps.set_font(BString::from("IBM VGA"))?;
 
-// For XBin files with explicit dimensions
-let caps = BinaryCapabilities::xbin(80, 50)?;
+// XBin with explicit dimensions
+let xbin_caps = BinaryCapabilities::xbin(80, 50)?;
+```
+
+To compute height of a BinaryText file after parsing:
+```rust
+if let Some(h) = bin_caps.binary_text_height_from_file_size(record.file_size()) {
+    println!("Derived height: {}", h);
+}
 ```
 
 ### Bitmap & Vector Graphics
@@ -246,50 +262,33 @@ let caps = ArchiveCapabilities { format: ArchiveFormat::Zip };
 
 ## String Encoding
 
-SAUCE strings are typically encoded in CP437 (DOS codepage). This library uses `bstr::BString` for all text fields, allowing you to handle the encoding as needed:
+SAUCE strings are typically encoded in CP437 (DOS codepage). This library uses `bstr::BString` for all text fields:
 
 ```rust
 use bstr::BString;
-
-// Create from CP437 bytes
-let title = BString::from(b"My \x01 ASCII Art");  // ☺ smiley in CP437
-
-// Convert to UTF-8 for display (lossy)
+let title = BString::from(b"My \x01 ASCII Art");
 println!("Title: {}", title.to_str_lossy());
 ```
 
 ## Error Handling
 
-The library provides detailed error types for various failure conditions:
-
 ```rust
 use icy_sauce::SauceError;
 
 match sauce_result {
-    Err(SauceError::TitleTooLong(len)) => {
-        println!("Title is {} bytes, max is 35", len);
-    }
-    Err(SauceError::CommentLimitExceeded) => {
-        println!("Cannot add more than 255 comments");
-    }
+    Err(SauceError::TitleTooLong(len)) => println!("Title is {} bytes, max is 35", len),
+    Err(SauceError::CommentLimitExceeded) => println!("Cannot add more than 255 comments"),
     _ => {}
 }
 ```
 
 ## Type-Safe Capabilities
 
-Each file type has its own strongly-typed capability structure, ensuring you can only set valid metadata:
-
 ```rust
 use icy_sauce::prelude::*;
-
-// Character files have dimensions and font settings
 let char_caps = CharacterCapabilities::new(CharacterFormat::Ansi).dimensions(80, 25);
-
-// Convert to general capabilities
 let caps = Capabilities::Character(char_caps);
 
-// Pattern match to access specific capabilities
 match caps {
     Capabilities::Character(c) => println!("Character format with {} columns", c.columns),
     Capabilities::Bitmap(b) => println!("Bitmap format: {:?}", b.format),
@@ -299,20 +298,31 @@ match caps {
 }
 ```
 
+## BinaryCapabilities Quick Reference
+
+| Field          | BinaryText Meaning                                | XBin Meaning                  |
+|----------------|----------------------------------------------------|-------------------------------|
+| `columns`      | Width (even 2–510)                                 | Width (0–65535, >0 recommended) |
+| `lines`        | Always 0 (height derived from file size)           | Explicit height               |
+| `ice_colors`   | Enables 16 background colors (non-blink mode)      | Ignored                       |
+| `letter_spacing` | 8/9 pixel or legacy spacing                      | Ignored (always legacy)       |
+| `aspect_ratio` | Legacy / LegacyDevice / Square                     | Ignored (legacy)              |
+| `font()`       | Optional font name (≤22 bytes)                     | Always `None`                 |
+
 ## Specifications
 
-This library implements the SAUCE v00 specification. For detailed information about the SAUCE format, visit:
+Implements SAUCE v00. Spec:  
 - [SAUCE Specification](http://www.acid.org/info/sauce/sauce.htm)
 
 ## License
 
-Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for details.
+Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE).
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit issues or pull requests on the [GitHub repository](https://github.com/mkrueger/icy_sauce).
+Issues and PRs welcome: <https://github.com/mkrueger/icy_sauce>.
 
 ## Related Projects
 
-- [icy_tools](https://github.com/mkrueger/icy_tools) - ANSI/ASCII art editor and viewer
-- [bstr](https://github.com/BurntSushi/bstr) - Byte string utilities (used for CP437 handling)
+- [icy_tools](https://github.com/mkrueger/icy_tools)
+- [bstr](https://github.com/BurntSushi/bstr)

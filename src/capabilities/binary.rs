@@ -42,7 +42,12 @@ use bstr::BString;
 
 use crate::{SauceDataType, SauceError, header::SauceHeader};
 
-use crate::character::{AspectRatio, LetterSpacing};
+use crate::character::{
+    ANSI_ASPECT_RATIO_LEGACY, ANSI_ASPECT_RATIO_SQUARE, ANSI_ASPECT_RATIO_STRETCH,
+    ANSI_FLAG_NON_BLINK_MODE, ANSI_LETTER_SPACING_8PX, ANSI_LETTER_SPACING_9PX,
+    ANSI_LETTER_SPACING_LEGACY, ANSI_MASK_ASPECT_RATIO, ANSI_MASK_LETTER_SPACING, AspectRatio,
+    LetterSpacing,
+};
 
 /// Binary text format discriminator.
 ///
@@ -137,9 +142,11 @@ impl BinaryFormat {
 /// use icy_sauce::{LetterSpacing, AspectRatio};
 /// use bstr::BString;
 ///
-/// let binary_text = BinaryCapabilities::binary_text(80).unwrap()
-///     .flags(true, LetterSpacing::NinePixel, AspectRatio::Square)
-///     .font(BString::from("IBM VGA")).unwrap();
+/// let mut binary_text = BinaryCapabilities::binary_text(80).unwrap();
+/// binary_text.ice_colors = true;
+/// binary_text.letter_spacing = LetterSpacing::NinePixel;
+/// binary_text.aspect_ratio = AspectRatio::Square;
+/// binary_text.set_font(BString::from("IBM VGA")).unwrap();
 /// assert_eq!(binary_text.columns, 80);
 /// ```
 #[derive(Debug, Clone, PartialEq)]
@@ -150,10 +157,15 @@ pub struct BinaryCapabilities {
     pub columns: u16,
     /// Height in lines (0 for BinaryText, explicit for XBIN)
     pub lines: u16,
-    /// ANSi flags (ICE, letter spacing, aspect ratio) - BinaryText only
-    pub flags: u8,
-    /// Optional font name (BinaryText only, max 22 bytes)
-    pub font: Option<BString>,
+
+    /// Whether ICE colors (16 background colors) are enabled
+    pub ice_colors: bool,
+    /// Letter spacing mode (8px vs 9px)
+    pub letter_spacing: LetterSpacing,
+    /// Pixel aspect ratio for rendering
+    pub aspect_ratio: AspectRatio,
+    /// Optional font name (max 22 bytes)
+    font_opt: Option<BString>,
 }
 
 impl BinaryCapabilities {
@@ -186,8 +198,10 @@ impl BinaryCapabilities {
             format: BinaryFormat::BinaryText,
             columns,
             lines: 0,
-            flags: 0,
-            font: None,
+            ice_colors: false,
+            letter_spacing: LetterSpacing::Legacy,
+            aspect_ratio: AspectRatio::Legacy,
+            font_opt: None,
         })
     }
 
@@ -196,11 +210,13 @@ impl BinaryCapabilities {
     /// # Arguments
     ///
     /// * `width` - Width in characters (must be > 0)
-    /// * `height` - Height in lines (must be > 0)
+    /// * `lines` - Height in lines (must be > 0)
+    ///
+    /// NOTE: This is the only info saved in a sauce record for xbin.
     ///
     /// # Errors
     ///
-    /// Returns [`SauceError::UnsupportedDataType`] if width or height is 0.
+    /// Returns [`SauceError::UnsupportedDataType`] if width or lines is 0.
     ///
     /// # Example
     ///
@@ -223,83 +239,80 @@ impl BinaryCapabilities {
             format: BinaryFormat::XBin,
             columns,
             lines,
-            flags: 0,
-            font: None,
+            ice_colors: false,
+            letter_spacing: LetterSpacing::Legacy,
+            aspect_ratio: AspectRatio::Legacy,
+            font_opt: None,
         })
     }
 
-    /// Add ANSi rendering flags (BinaryText only).
+    /// Get a reference to the optional font name.
     ///
-    /// # Arguments
+    /// # Returns
     ///
-    /// * `ice_colors` - Enable ICE colors (16 background colors instead of blinking)
-    /// * `letter_spacing` - Character width mode (8px vs 9px)
-    /// * `aspect_ratio` - Pixel aspect ratio (square vs legacy)
-    ///
-    /// # Behavior
-    ///
-    /// For XBIN format, this method does nothing (silently ignored).
-    /// Flags are only meaningful for BinaryText.
+    /// `Some(&font)` if a font has been set, or `None` if not.
     ///
     /// # Example
     ///
     /// ```
     /// use icy_sauce::BinaryCapabilities;
-    /// use icy_sauce::{LetterSpacing, AspectRatio};
-    ///
-    /// let binary_text = BinaryCapabilities::binary_text(80).unwrap()
-    ///     .flags(true, LetterSpacing::NinePixel, AspectRatio::Square);
+    /// let caps = BinaryCapabilities::binary_text(80).unwrap();
+    /// assert_eq!(caps.font(), None);
     /// ```
-    pub fn flags(
-        mut self,
-        ice_colors: bool,
-        letter_spacing: LetterSpacing,
-        aspect_ratio: AspectRatio,
-    ) -> Self {
-        if self.format == BinaryFormat::BinaryText {
-            self.flags = build_ansi_flags(ice_colors, letter_spacing, aspect_ratio);
-        }
-        self
+    pub fn font(&self) -> Option<&BString> {
+        self.font_opt.as_ref()
     }
 
-    /// Set the font name (BinaryText only).
+    /// Set the font name with validation.
     ///
     /// # Arguments
     ///
-    /// * `font` - Font name (max 22 bytes); empty string clears the font
+    /// * `font` - The font name to set (max 22 bytes), or empty to clear
     ///
     /// # Errors
     ///
-    /// Returns [`SauceError::FontNameTooLong`] if font name exceeds 22 bytes.
+    /// Returns [`SauceError::FontNameTooLong`] if the font name exceeds 22 bytes.
     ///
     /// # Behavior
     ///
-    /// For XBIN format, this method does nothing (silently ignored).
-    /// Font names are only meaningful for BinaryText.
+    /// - Passing an empty `BString` clears the font (equivalent to [`clear_font`](Self::clear_font))
+    /// - Non-empty strings up to 22 bytes are stored
     ///
     /// # Example
     ///
     /// ```
     /// use icy_sauce::BinaryCapabilities;
     /// use bstr::BString;
-    ///
-    /// let binary_text = BinaryCapabilities::binary_text(80).unwrap()
-    ///     .font(BString::from("IBM VGA")).unwrap();
+    /// let mut caps = BinaryCapabilities::binary_text(80).unwrap();
+    /// caps.set_font(BString::from("IBM VGA")).unwrap();
+    /// assert_eq!(caps.font(), Some(&BString::from("IBM VGA")));
     /// ```
-    pub fn font(mut self, font: BString) -> crate::Result<Self> {
-        if self.format != BinaryFormat::BinaryText {
-            // Ignore silently or return an error; choose silent ignore to be lenient.
-            return Ok(self);
-        }
+    pub fn set_font(&mut self, font: BString) -> crate::Result<()> {
         if font.len() > 22 {
             return Err(SauceError::FontNameTooLong(font.len()));
         }
         if font.is_empty() {
-            self.font = None;
-        } else {
-            self.font = Some(font);
+            self.font_opt = None;
+            return Ok(());
         }
-        Ok(self)
+        self.font_opt = Some(font);
+        Ok(())
+    }
+
+    /// Clear the font name, setting it to `None`.
+    ///
+    /// This is equivalent to calling [`set_font`](Self::set_font) with an empty `BString`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use icy_sauce::BinaryCapabilities;
+    /// let mut caps = BinaryCapabilities::binary_text(80).unwrap();
+    /// caps.remove_font();
+    /// assert_eq!(caps.font(), None);
+    /// ```
+    pub fn remove_font(&mut self) {
+        self.font_opt = None;
     }
 
     /// Parse binary text capabilities from a SAUCE header.
@@ -395,8 +408,31 @@ impl BinaryCapabilities {
                 header.t_info2 = 0;
                 header.t_info3 = 0;
                 header.t_info4 = 0;
-                header.t_flags = self.flags;
-                if let Some(font) = &self.font {
+
+                // Build flags byte
+                header.t_flags = if self.ice_colors {
+                    ANSI_FLAG_NON_BLINK_MODE
+                } else {
+                    0
+                };
+
+                // Add letter spacing bits
+                header.t_flags |= match self.letter_spacing {
+                    LetterSpacing::Legacy => ANSI_LETTER_SPACING_LEGACY,
+                    LetterSpacing::EightPixel => ANSI_LETTER_SPACING_8PX,
+                    LetterSpacing::NinePixel => ANSI_LETTER_SPACING_9PX,
+                    LetterSpacing::Reserved => ANSI_LETTER_SPACING_LEGACY, // fallback
+                };
+
+                // Add aspect ratio bits
+                header.t_flags |= match self.aspect_ratio {
+                    AspectRatio::Legacy => ANSI_ASPECT_RATIO_LEGACY,
+                    AspectRatio::LegacyDevice => ANSI_ASPECT_RATIO_STRETCH,
+                    AspectRatio::Square => ANSI_ASPECT_RATIO_SQUARE,
+                    AspectRatio::Reserved => ANSI_ASPECT_RATIO_LEGACY, // fallback
+                };
+
+                if let Some(font) = &self.font_opt {
                     header.t_info_s.clone_from(font);
                 } else {
                     header.t_info_s.clear();
@@ -475,7 +511,21 @@ impl TryFrom<&SauceHeader> for BinaryCapabilities {
                 if width == 0 {
                     return Err(SauceError::BinFileWidthLimitExceeded(0));
                 }
-                let font = if header.t_info_s.is_empty() {
+                let ice_colors =
+                    (header.t_flags & ANSI_FLAG_NON_BLINK_MODE) == ANSI_FLAG_NON_BLINK_MODE;
+                let letter_spacing = match header.t_flags & ANSI_MASK_LETTER_SPACING {
+                    ANSI_LETTER_SPACING_LEGACY => LetterSpacing::Legacy,
+                    ANSI_LETTER_SPACING_8PX => LetterSpacing::EightPixel,
+                    ANSI_LETTER_SPACING_9PX => LetterSpacing::NinePixel,
+                    _ => LetterSpacing::Reserved,
+                };
+                let aspect_ratio = match header.t_flags & ANSI_MASK_ASPECT_RATIO {
+                    ANSI_ASPECT_RATIO_LEGACY => AspectRatio::Legacy,
+                    ANSI_ASPECT_RATIO_STRETCH => AspectRatio::LegacyDevice,
+                    ANSI_ASPECT_RATIO_SQUARE => AspectRatio::Square,
+                    _ => AspectRatio::Reserved,
+                };
+                let font_opt = if header.t_info_s.is_empty() {
                     None
                 } else {
                     Some(header.t_info_s.clone())
@@ -484,57 +534,21 @@ impl TryFrom<&SauceHeader> for BinaryCapabilities {
                     format,
                     columns: width,
                     lines: 0,
-                    flags: header.t_flags,
-                    font,
+                    ice_colors,
+                    letter_spacing,
+                    aspect_ratio,
+                    font_opt,
                 })
             }
             BinaryFormat::XBin => Ok(Self {
                 format,
                 columns: header.t_info1,
                 lines: header.t_info2,
-                flags: 0,
-                font: None,
+                ice_colors: false,
+                letter_spacing: LetterSpacing::Legacy,
+                aspect_ratio: AspectRatio::Legacy,
+                font_opt: None,
             }),
         }
     }
-}
-
-/// Build ANSi flags byte for BinaryText format.
-///
-/// Constructs an 8-bit flags byte encoding iCE color mode, letter spacing, and aspect ratio.
-///
-/// # Bit Layout
-/// * B (bit 0) – iCE (1 = enabled, 0 = disabled)
-/// * LS (bits 1–2) – letter spacing (legacy, 8-pixel, 9-pixel, reserved)
-/// * AR (bits 3–4) – aspect ratio (legacy, legacy device, square, reserved)
-///
-/// # Arguments
-/// * `ice_colors` - Enable iCE color mode (bit 0)
-/// * `letter_spacing` - Text letter spacing setting
-/// * `aspect_ratio` - Character aspect ratio setting
-///
-/// # Returns
-/// An 8-bit flags byte suitable for SAUCE BinaryText records.
-fn build_ansi_flags(
-    ice_colors: bool,
-    letter_spacing: LetterSpacing,
-    aspect_ratio: AspectRatio,
-) -> u8 {
-    let mut flags = 0u8;
-    if ice_colors {
-        flags |= 0b0000_0001;
-    }
-    flags |= match letter_spacing {
-        LetterSpacing::Legacy => 0b0000_0000,
-        LetterSpacing::EightPixel => 0b0000_0010,
-        LetterSpacing::NinePixel => 0b0000_0100,
-        LetterSpacing::Reserved => 0b0000_0000,
-    };
-    flags |= match aspect_ratio {
-        AspectRatio::Legacy => 0b0000_0000,
-        AspectRatio::LegacyDevice => 0b0000_1000,
-        AspectRatio::Square => 0b0001_0000,
-        AspectRatio::Reserved => 0b0000_0000,
-    };
-    flags
 }

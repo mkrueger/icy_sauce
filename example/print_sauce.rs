@@ -103,11 +103,6 @@ fn main() {
                 {
                     println!("  Height:     {} rows (calculated)", height);
                 }
-                if let Some(font) = &caps.font {
-                    if !font.is_empty() {
-                        println!("  Font:       {}", font);
-                    }
-                }
             }
             Capabilities::Vector(caps) => {
                 println!("Vector Graphics File Information:");

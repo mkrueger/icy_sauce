@@ -39,20 +39,20 @@ use crate::{SauceDataType, SauceError, header::SauceHeader};
 
 /// ANSI flags bitmask for non-blink mode (ice colors).
 /// When set (bit 0), the 16 background colors become available instead of blinking.
-const ANSI_FLAG_NON_BLINK_MODE: u8 = 0b0000_0001;
+pub(crate) const ANSI_FLAG_NON_BLINK_MODE: u8 = 0b0000_0001;
 /// ANSI flags bitmask for letter spacing (bits 1-2).
 /// Values: 00=Legacy, 01=8-pixel, 10=9-pixel, 11=Reserved
-const ANSI_MASK_LETTER_SPACING: u8 = 0b0000_0110;
-const ANSI_LETTER_SPACING_LEGACY: u8 = 0b0000_0000;
-const ANSI_LETTER_SPACING_8PX: u8 = 0b0000_0010;
-const ANSI_LETTER_SPACING_9PX: u8 = 0b0000_0100;
+pub(crate) const ANSI_MASK_LETTER_SPACING: u8 = 0b0000_0110;
+pub(crate) const ANSI_LETTER_SPACING_LEGACY: u8 = 0b0000_0000;
+pub(crate) const ANSI_LETTER_SPACING_8PX: u8 = 0b0000_0010;
+pub(crate) const ANSI_LETTER_SPACING_9PX: u8 = 0b0000_0100;
 
 /// ANSI flags bitmask for aspect ratio (bits 3-4).
 /// Values: 00=Legacy, 01=LegacyDevice (needs stretching), 10=Square (modern), 11=Reserved
-const ANSI_MASK_ASPECT_RATIO: u8 = 0b0001_1000;
-const ANSI_ASPECT_RATIO_LEGACY: u8 = 0b0000_0000;
-const ANSI_ASPECT_RATIO_STRETCH: u8 = 0b0000_1000;
-const ANSI_ASPECT_RATIO_SQUARE: u8 = 0b0001_0000;
+pub(crate) const ANSI_MASK_ASPECT_RATIO: u8 = 0b0001_1000;
+pub(crate) const ANSI_ASPECT_RATIO_LEGACY: u8 = 0b0000_0000;
+pub(crate) const ANSI_ASPECT_RATIO_STRETCH: u8 = 0b0000_1000;
+pub(crate) const ANSI_ASPECT_RATIO_SQUARE: u8 = 0b0001_0000;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 /// Character format types as specified in the SAUCE v00 specification.
@@ -547,36 +547,6 @@ impl CharacterCapabilities {
     /// ```
     pub(crate) fn encode_into_header(&self, header: &mut SauceHeader) -> crate::Result<()> {
         match header.data_type {
-            SauceDataType::BinaryText => {
-                // BinaryText: file_type encodes width/2; width must be even and <= 510.
-                if self.columns == 0 || self.columns % 2 != 0 || self.columns > 510 {
-                    return Err(SauceError::BinFileWidthLimitExceeded(self.columns as i32));
-                }
-                header.file_type = (self.columns / 2) as u8;
-                header.t_info1 = 0;
-                header.t_info2 = 0;
-                header.t_info3 = 0;
-                header.t_info4 = 0;
-                header.t_flags = if self.ice_colors {
-                    ANSI_FLAG_NON_BLINK_MODE
-                } else {
-                    0
-                };
-                if let Some(font) = &self.font_opt {
-                    header.t_info_s.clone_from(font);
-                } else {
-                    header.t_info_s.clear();
-                }
-            }
-            SauceDataType::XBin => {
-                header.file_type = 0; // XBin has no file type
-                header.t_info1 = self.columns;
-                header.t_info2 = self.lines;
-                header.t_info3 = 0;
-                header.t_info4 = 0;
-                header.t_flags = 0;
-                header.t_info_s.clear();
-            }
             SauceDataType::Character => {
                 header.file_type = self.format.to_sauce();
 
@@ -702,7 +672,11 @@ impl TryFrom<&SauceHeader> for CharacterCapabilities {
                 ANSI_ASPECT_RATIO_SQUARE => AspectRatio::Square,
                 _ => AspectRatio::Reserved,
             };
-            font_opt = Some(header.t_info_s.clone());
+            font_opt = if header.t_info_s.is_empty() {
+                None
+            } else {
+                Some(header.t_info_s.clone())
+            };
         } else if format == CharacterFormat::RipScript {
             // RipScript fixed logical dimensions
             columns = 80;
