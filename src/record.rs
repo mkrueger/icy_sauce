@@ -34,7 +34,9 @@
 //! ```
 
 use std::{
-    cell::OnceCell, fs::File, io::{Read, Seek, SeekFrom, Write}
+    cell::OnceCell,
+    fs::File,
+    io::{Read, Seek, SeekFrom, Write},
 };
 
 use bstr::BString;
@@ -81,7 +83,6 @@ impl Clone for SauceRecord {
     }
 }
 
-
 impl SauceRecord {
     pub fn from_bytes(data: &[u8]) -> crate::Result<Option<Self>> {
         let Some(header) = SauceHeader::from_bytes(data)? else {
@@ -123,7 +124,11 @@ impl SauceRecord {
             }
         }
 
-        Ok(Some(SauceRecord { header, comments, cached_caps: OnceCell::new() }))
+        Ok(Some(SauceRecord {
+            header,
+            comments,
+            cached_caps: OnceCell::new(),
+        }))
     }
 
     pub fn from_path(path: &std::path::Path) -> crate::Result<Option<Self>> {
@@ -139,16 +144,16 @@ impl SauceRecord {
         Self::from_bytes(&buf)
     }
 
-     /// Write SAUCE with EOF marker (standard format).
+    /// Write SAUCE with EOF marker (standard format).
     pub fn write<W: Write>(&self, writer: &mut W) -> crate::Result<()> {
         self.write_internal(writer, true)
     }
-    
+
     /// Write SAUCE without EOF marker (for special cases).
     pub fn write_without_eof<W: Write>(&self, writer: &mut W) -> crate::Result<()> {
         self.write_internal(writer, false)
     }
-    
+
     fn write_internal<W: Write>(&self, writer: &mut W, eof: bool) -> crate::Result<()> {
         // EOF Char.
         if eof {
@@ -368,31 +373,32 @@ impl SauceRecord {
     /// }
     /// ```
     pub fn capabilities(&self) -> Option<Capabilities> {
-         self.cached_caps
-            .get_or_init(|| {
-                match self.header.data_type {
-                    SauceDataType::Character => CharacterCapabilities::try_from(&self.header)
+        self.cached_caps
+            .get_or_init(|| match self.header.data_type {
+                SauceDataType::Character => CharacterCapabilities::try_from(&self.header)
+                    .ok()
+                    .map(Capabilities::Character),
+                SauceDataType::BinaryText | SauceDataType::XBin => {
+                    BinaryCapabilities::try_from(&self.header)
                         .ok()
-                        .map(Capabilities::Character),
-                    SauceDataType::BinaryText | SauceDataType::XBin =>
-                        BinaryCapabilities::try_from(&self.header).ok().map(Capabilities::Binary),
-                    SauceDataType::Bitmap => BitmapCapabilities::try_from(&self.header)
-                        .ok()
-                        .map(Capabilities::Bitmap),
-                    SauceDataType::Vector => VectorCapabilities::try_from(&self.header)
-                        .ok()
-                        .map(Capabilities::Vector),
-                    SauceDataType::Audio => AudioCapabilities::try_from(&self.header)
-                        .ok()
-                        .map(Capabilities::Audio),
-                    SauceDataType::Archive => ArchiveCapabilities::try_from(&self.header)
-                        .ok()
-                        .map(Capabilities::Archive),
-                    SauceDataType::Executable => ExecutableCapabilities::try_from(&self.header)
-                        .ok()
-                        .map(Capabilities::Executable),
-                    _ => None,
+                        .map(Capabilities::Binary)
                 }
+                SauceDataType::Bitmap => BitmapCapabilities::try_from(&self.header)
+                    .ok()
+                    .map(Capabilities::Bitmap),
+                SauceDataType::Vector => VectorCapabilities::try_from(&self.header)
+                    .ok()
+                    .map(Capabilities::Vector),
+                SauceDataType::Audio => AudioCapabilities::try_from(&self.header)
+                    .ok()
+                    .map(Capabilities::Audio),
+                SauceDataType::Archive => ArchiveCapabilities::try_from(&self.header)
+                    .ok()
+                    .map(Capabilities::Archive),
+                SauceDataType::Executable => ExecutableCapabilities::try_from(&self.header)
+                    .ok()
+                    .map(Capabilities::Executable),
+                _ => None,
             })
             .clone()
     }

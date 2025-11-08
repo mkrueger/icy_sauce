@@ -46,35 +46,35 @@
 //! still import from the crate root (e.g. `use icy_sauce::header::SauceHeader`).
 
 pub use crate::{
-    // Core types
-    SauceRecord,
-    SauceRecordBuilder,
-    SauceDate,
-    SauceDataType,
-    SauceError,
-    Result,
-    // Unified enum
-    Capabilities,
-    // Character
-    CharacterCapabilities,
-    CharacterFormat,
-    LetterSpacing,
+    // Archive
+    ArchiveCapabilities,
+    ArchiveFormat,
     AspectRatio,
+    // Audio
+    AudioCapabilities,
+    AudioFormat,
     // Binary
     BinaryCapabilities,
     BinaryFormat,
     // Bitmap
     BitmapCapabilities,
     BitmapFormat,
+    // Unified enum
+    Capabilities,
+    // Character
+    CharacterCapabilities,
+    CharacterFormat,
+    // Executable
+    ExecutableCapabilities,
+    LetterSpacing,
+    Result,
+    SauceDataType,
+    SauceDate,
+    SauceError,
+    // Core types
+    SauceRecord,
+    SauceRecordBuilder,
     // Vector
     VectorCapabilities,
     VectorFormat,
-    // Audio
-    AudioCapabilities,
-    AudioFormat,
-    // Archive
-    ArchiveCapabilities,
-    ArchiveFormat,
-    // Executable
-    ExecutableCapabilities,
 };

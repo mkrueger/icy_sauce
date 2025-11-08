@@ -158,9 +158,8 @@ fn test_letter_spacing_aspect_ratio_roundtrip() {
     }
 }
 
-
-use proptest::proptest;
 use proptest::collection::vec;
+use proptest::proptest;
 
 proptest! {
     #[test]
@@ -178,11 +177,11 @@ proptest! {
             .author(BString::from(author_bytes))?
             .capabilities(Capabilities::Character(caps))?
             .build();
-        
+
         let mut buf = Vec::new();
         record.write(&mut buf)?;
         let parsed = SauceRecord::from_bytes(&buf)?.unwrap();
-        
+
         assert_eq!(parsed.title(), record.title());
         assert_eq!(parsed.author(), record.author());
         assert_eq!(parsed.capabilities(), record.capabilities());

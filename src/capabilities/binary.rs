@@ -475,10 +475,26 @@ impl TryFrom<&SauceHeader> for BinaryCapabilities {
                 if width == 0 {
                     return Err(SauceError::BinFileWidthLimitExceeded(0));
                 }
-                let font = if header.t_info_s.is_empty() { None } else { Some(header.t_info_s.clone()) };
-                Ok(Self { format, columns: width, lines: 0, flags: header.t_flags, font })
+                let font = if header.t_info_s.is_empty() {
+                    None
+                } else {
+                    Some(header.t_info_s.clone())
+                };
+                Ok(Self {
+                    format,
+                    columns: width,
+                    lines: 0,
+                    flags: header.t_flags,
+                    font,
+                })
             }
-            BinaryFormat::XBin => Ok(Self { format, columns: header.t_info1, lines: header.t_info2, flags: 0, font: None }),
+            BinaryFormat::XBin => Ok(Self {
+                format,
+                columns: header.t_info1,
+                lines: header.t_info2,
+                flags: 0,
+                font: None,
+            }),
         }
     }
 }

@@ -459,6 +459,11 @@ impl TryFrom<&SauceHeader> for BitmapCapabilities {
             SauceDataType::Bitmap => (header.t_info1, header.t_info2, header.t_info3),
             _ => return Err(SauceError::UnsupportedDataType(header.data_type)),
         };
-        Ok(BitmapCapabilities { format: graphics_format, width, height, pixel_depth })
+        Ok(BitmapCapabilities {
+            format: graphics_format,
+            width,
+            height,
+            pixel_depth,
+        })
     }
 }

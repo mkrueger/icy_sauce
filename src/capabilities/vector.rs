@@ -109,7 +109,9 @@ impl TryFrom<&SauceHeader> for VectorCapabilities {
         if header.data_type != SauceDataType::Vector {
             return Err(SauceError::UnsupportedDataType(header.data_type));
         }
-        Ok(VectorCapabilities { format: VectorFormat::from_sauce(header.file_type) })
+        Ok(VectorCapabilities {
+            format: VectorFormat::from_sauce(header.file_type),
+        })
     }
 }
 

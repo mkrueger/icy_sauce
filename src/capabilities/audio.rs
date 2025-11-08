@@ -587,7 +587,14 @@ impl TryFrom<&SauceHeader> for AudioCapabilities {
             return Err(SauceError::UnsupportedDataType(header.data_type));
         }
         let format = AudioFormat::from_sauce(header.file_type);
-        let sample_rate = if format.has_sample_rate() { header.t_info1 } else { 0 };
-        Ok(AudioCapabilities { format, sample_rate })
+        let sample_rate = if format.has_sample_rate() {
+            header.t_info1
+        } else {
+            0
+        };
+        Ok(AudioCapabilities {
+            format,
+            sample_rate,
+        })
     }
 }

@@ -422,7 +422,6 @@ impl CharacterCapabilities {
         })
     }
 
-
     /// Get a reference to the optional font name.
     ///
     /// # Returns
@@ -717,6 +716,14 @@ impl TryFrom<&SauceHeader> for CharacterCapabilities {
             lines = 0;
         }
 
-        Ok(CharacterCapabilities { format, columns, lines, ice_colors, letter_spacing, aspect_ratio, font_opt })
+        Ok(CharacterCapabilities {
+            format,
+            columns,
+            lines,
+            ice_colors,
+            letter_spacing,
+            aspect_ratio,
+            font_opt,
+        })
     }
 }
