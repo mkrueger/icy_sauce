@@ -84,6 +84,26 @@ impl Clone for SauceRecord {
 }
 
 impl SauceRecord {
+    /// Attempt to parse a SAUCE record from a complete file buffer.
+    ///
+    /// This function expects the slice `data` to contain the entire file contents,
+    /// including any trailing SAUCE header, optional comment block and the EOF marker (0x1A).
+    /// It scans from the end using [`SauceHeader::from_bytes`].
+    ///
+    /// # Returns
+    /// * `Ok(Some(record))` if a valid SAUCE header is found.
+    /// * `Ok(None)` if no SAUCE record exists (file has no SAUCE metadata).
+    /// * `Err(e)` if malformed SAUCE data is detected (e.g. truncated comment block).
+    ///
+    /// # Robustness
+    /// The SAUCE specification tolerates certain minor deviations; for example a missing
+    /// `COMNT` marker or missing EOF character are logged as warnings (via the `log` crate)
+    /// but do not abort parsing. Severe structural problems (length mismatches) yield an error.
+    ///
+    /// # Performance
+    /// Parsing is O(1) relative to the number of comments (bounded to 255) and otherwise
+    /// proportional to the fixed header size. No heap allocations are performed except
+    /// for copying comment lines and the header's owned strings.
     pub fn from_bytes(data: &[u8]) -> crate::Result<Option<Self>> {
         let Some(header) = SauceHeader::from_bytes(data)? else {
             return Ok(None);
@@ -131,6 +151,21 @@ impl SauceRecord {
         }))
     }
 
+    /// Efficiently parse a SAUCE record from a file path.
+    ///
+    /// Instead of reading the entire file, only the trailing window large enough to hold
+    /// the maximum possible SAUCE payload (header + comment block + COMNT marker + EOF) is read.
+    /// This keeps memory usage low for large artwork files.
+    ///
+    /// # Arguments
+    /// * `path` - Path to the file on disk.
+    ///
+    /// # Returns
+    /// Same semantics as [`from_bytes`](Self::from_bytes).
+    ///
+    /// # Errors
+    /// I/O failures are wrapped in [`SauceError::IoError`]. Structural SAUCE issues yield
+    /// specific `SauceError` variants.
     pub fn from_path(path: &std::path::Path) -> crate::Result<Option<Self>> {
         const MAX_SAUCE_WINDOW: u64 = 128 + 5 + 255 * 64 + 1;
         let mut f = File::open(path).map_err(crate::SauceError::IoError)?;
@@ -144,12 +179,23 @@ impl SauceRecord {
         Self::from_bytes(&buf)
     }
 
+    /// Serialize this SAUCE record (including EOF marker) to a fresh `Vec<u8>`.
+    ///
+    /// Useful for appending to existing file content or for tests that need a full
+    /// byte representation. Use [`to_bytes_without_eof`](Self::to_bytes_without_eof)
+    /// if you need only the SAUCE payload without the leading EOF marker.
     pub fn to_bytes(&self) -> crate::Result<Vec<u8>> {
         let mut buf = Vec::with_capacity(self.record_len() + 1); // +1 for EOF
         self.write(&mut buf)?;
         Ok(buf)
     }
 
+    /// Serialize this SAUCE record without the EOF marker.
+    ///
+    /// The SAUCE specification places a single 0x1A byte before the comment block / header.
+    
+    /// Certain embedding contexts already manage this EOF marker externally; for those scenarios
+    /// this variant avoids duplication.
     pub fn to_bytes_without_eof(&self) -> crate::Result<Vec<u8>> {
         let mut buf = Vec::with_capacity(self.record_len());
         self.write_without_eof(&mut buf)?;
@@ -166,6 +212,12 @@ impl SauceRecord {
         self.write_internal(writer, false)
     }
 
+    /// Internal unified writer for both public write variants.
+    ///
+    /// When `eof` is true an EOF marker (0x1A) is prepended. Comments (if any) are serialized
+    /// with a `COMNT` marker followed by each space‑padded 64 byte line. Finally the header
+    /// (128 bytes) is written. In case of any I/O error an appropriate [`SauceError::IoError`]
+    /// is returned.
     fn write_internal<W: Write>(&self, writer: &mut W, eof: bool) -> crate::Result<()> {
         // EOF Char.
         if eof {
