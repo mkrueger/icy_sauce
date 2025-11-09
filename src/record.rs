@@ -144,6 +144,18 @@ impl SauceRecord {
         Self::from_bytes(&buf)
     }
 
+    pub fn to_bytes(&self) -> crate::Result<Vec<u8>> {
+        let mut buf = Vec::with_capacity(self.record_len() + 1); // +1 for EOF
+        self.write(&mut buf)?;
+        Ok(buf)
+    }
+
+    pub fn to_bytes_without_eof(&self) -> crate::Result<Vec<u8>> {
+        let mut buf = Vec::with_capacity(self.record_len());
+        self.write_without_eof(&mut buf)?;
+        Ok(buf)
+    }
+
     /// Write SAUCE with EOF marker (standard format).
     pub fn write<W: Write>(&self, writer: &mut W) -> crate::Result<()> {
         self.write_internal(writer, true)
