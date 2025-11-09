@@ -184,22 +184,21 @@ impl SauceRecord {
     /// Useful for appending to existing file content or for tests that need a full
     /// byte representation. Use [`to_bytes_without_eof`](Self::to_bytes_without_eof)
     /// if you need only the SAUCE payload without the leading EOF marker.
-    pub fn to_bytes(&self) -> crate::Result<Vec<u8>> {
+    pub fn to_bytes(&self) -> Vec<u8> {
         let mut buf = Vec::with_capacity(self.record_len() + 1); // +1 for EOF
-        self.write(&mut buf)?;
-        Ok(buf)
+        let _ = self.write(&mut buf);
+        buf
     }
 
     /// Serialize this SAUCE record without the EOF marker.
     ///
-    /// The SAUCE specification places a single 0x1A byte before the comment block / header.
-    
+    /// The SAUCE specification places a single 0x1A byte before the comment block / header.    
     /// Certain embedding contexts already manage this EOF marker externally; for those scenarios
     /// this variant avoids duplication.
-    pub fn to_bytes_without_eof(&self) -> crate::Result<Vec<u8>> {
+    pub fn to_bytes_without_eof(&self) -> Vec<u8> {
         let mut buf = Vec::with_capacity(self.record_len());
-        self.write_without_eof(&mut buf)?;
-        Ok(buf)
+        let _ = self.write_without_eof(&mut buf);
+        buf
     }
 
     /// Write SAUCE with EOF marker (standard format).
