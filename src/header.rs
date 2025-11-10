@@ -57,7 +57,7 @@ const SAUCE_ID: &[u8; 5] = b"SAUCE";
 /// Maximum length for the TInfoS field in bytes (zero-padded)
 pub(crate) const TINFO_LEN: usize = 22;
 
-#[derive(Clone, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 /// Raw SAUCE v00 metadata header (128 bytes).
 ///
 /// `SauceHeader` represents the complete SAUCE record structure as stored in files.

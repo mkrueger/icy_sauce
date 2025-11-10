@@ -1,0 +1,38 @@
+[package]
+name = "icy_sauce-fuzz"
+autobins = false
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[dependencies]
+libfuzzer-sys = { version = "0.4", features = ["arbitrary-derive"] }
+icy_sauce = { path = ".." }
+arbitrary = "1"
+
+[profile.dev]
+opt-level = 1
+
+[profile.release]
+opt-level = 3
+
+[package.metadata]
+cargo-fuzz = true
+
+[[bin]]
+name = "date_parse"
+path = "fuzz_targets/date_parse.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "header_parse"
+path = "fuzz_targets/header_parse.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "strip_logic"
+path = "fuzz_targets/strip_logic.rs"
+test = false
+doc = false

@@ -12,3 +12,10 @@ Cargo.lock
 
 # MSVC Windows builds of rustc generate these, which store debugging information
 *.pdb
+
+# Fuzzing (cargo-fuzz)
+fuzz/artifacts/
+
+# Optional: keep hand-written seed corpus by whitelisting a seeds folder
+# !fuzz/corpus/seeds/
+!fuzz/corpus/header_parse/*
