@@ -70,7 +70,6 @@ pub use crate::{
     Result,
     SauceDataType,
     SauceDate,
-    SauceError,
     // Core types
     SauceRecord,
     SauceRecordBuilder,

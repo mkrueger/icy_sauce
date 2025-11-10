@@ -105,6 +105,60 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     caps.set_font(BString::from("IBM VGA"))?;
 
     let sauce = SauceRecordBuilder::default()
+
+### Stripping SAUCE Metadata
+
+You can remove one or more SAUCE records (and optionally their preceding EOF 0x1A marker) from the end of a file buffer without copying the data using `strip_sauce`.
+
+`StripMode` variants:
+
+| Mode | Removes | EOF Handling | Use Case |
+|------|---------|--------------|----------|
+| `Last` | Last SAUCE record | Preserves all EOF bytes | Keep legacy EOF marker but drop metadata |
+| `LastStripFinalEof` (default) | Last SAUCE record | Removes a single EOF directly before the record | Clean view of payload |
+| `All` | All contiguous SAUCE records (separated by ≤1 EOF each) | Preserves trailing EOF bytes | Multi-edit cleanup while keeping final EOF |
+| `AllStripFinalEof` | All contiguous SAUCE records | Also strips a single trailing EOF after last removed record | Aggressive full cleanup |
+
+Contiguous multi-record stripping stops if more than one consecutive EOF (0x1A 0x1A ...) separates records—stacked EOFs form a barrier.
+
+```rust
+use icy_sauce::{strip_sauce, StripMode};
+
+// Assume `data` contains file payload + EOF + SAUCE
+let cleaned = strip_sauce(&data, StripMode::default()); // LastStripFinalEof
+
+// Keep EOF marker but remove SAUCE
+let keep_eof = strip_sauce(&data, StripMode::Last);
+
+// Remove multiple contiguous SAUCE records, keep trailing EOF(s)
+let multi = strip_sauce(&data, StripMode::All);
+
+// Most aggressive: remove all contiguous SAUCE records and one trailing EOF
+let aggressive = strip_sauce(&data, StripMode::AllStripFinalEof);
+```
+
+Multi-record example:
+
+```text
+"Content" 0x1A SAUCE1 0x1A SAUCE2 0x1A  -> StripMode::All ->  "Content" 0x1A
+
+"Content" 0x1A SAUCE1 0x1A 0x1A SAUCE2 -> StripMode::All ->  "Content" 0x1A 0x1A SAUCE2  (double EOF blocks chain)
+```
+
+#### Getting Strip Statistics
+
+Use `strip_sauce_ex` for metadata about the operation:
+
+```rust
+use icy_sauce::{strip_sauce_ex, StripMode};
+
+let result = strip_sauce_ex(&data, StripMode::AllStripFinalEof);
+println!("Removed {} record(s), {} EOF byte(s); new length {}", 
+         result.records_removed, result.eof_bytes_removed, result.data.len());
+```
+
+If no SAUCE record is found, the original slice is returned unchanged.
+
         .title(BString::from("My Artwork"))?
         .author(BString::from("Artist"))?
         .group(BString::from("Art Group"))?

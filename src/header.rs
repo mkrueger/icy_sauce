@@ -48,9 +48,8 @@
 
 use bstr::BString;
 
-use crate::{
-    SauceDataType, SauceDate, SauceError, limits, sauce_pad, trim_spaces, zero_pad, zero_trim,
-};
+use crate::util::{sauce_pad, trim_spaces, zero_pad, zero_trim};
+use crate::{COMMENT_ID_LEN, COMMENT_LEN, SauceDataType, SauceDate, SauceError, limits};
 
 pub(crate) const HDR_LEN: usize = 128;
 const SAUCE_ID: &[u8; 5] = b"SAUCE";
@@ -229,6 +228,34 @@ impl SauceHeader {
             t_flags,
             t_info_s,
         }))
+    }
+
+    /// Compute the total serialized length of this header plus its optional
+    /// comment block and leading COMNT marker.
+    ///
+    /// This does NOT include the leading EOF (0x1A) byte that precedes the
+    /// comment block/header in full SAUCE records. For the complete size used
+    /// when writing a record with EOF, add 1 to this value.
+    ///
+    /// Formula:
+    /// ```text
+    /// total = 128 (header) + (comments == 0 ? 0 : 5 + comments * 64)
+    /// ```
+    ///
+    /// # Example
+    /// ```
+    /// use icy_sauce::header::SauceHeader;
+    /// let mut h = SauceHeader::default();
+    /// assert_eq!(h.total_length(), 128);
+    /// h.comments = 2; // two comment lines
+    /// assert_eq!(h.total_length(), 128 + 5 + 2 * 64);
+    /// ```
+    pub fn total_length(&self) -> usize {
+        if self.comments == 0 {
+            HDR_LEN
+        } else {
+            HDR_LEN + COMMENT_ID_LEN + self.comments as usize * COMMENT_LEN
+        }
     }
 
     /// Serialize this SAUCE header to bytes.

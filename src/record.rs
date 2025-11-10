@@ -51,11 +51,11 @@ use crate::{
     character::CharacterCapabilities,
     executable::ExecutableCapabilities,
     header::{HDR_LEN, SauceHeader},
-    sauce_pad, trim_spaces,
+    util::{sauce_pad, trim_spaces},
 };
 
 pub(crate) const COMMENT_LEN: usize = 64;
-const COMMENT_ID_LEN: usize = 5;
+pub(crate) const COMMENT_ID_LEN: usize = 5;
 const COMMENT_ID: [u8; COMMENT_ID_LEN] = *b"COMNT";
 
 /// SAUCE information.
