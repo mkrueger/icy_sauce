@@ -85,3 +85,11 @@ fn equality_check() {
     assert_eq!(a, b);
     assert_ne!(a, c);
 }
+
+// Round-trip: write then parse
+#[test]
+fn test_invalid_data() {
+    let buf = b"1-991231";
+    let invalid = SauceDate::from_bytes(buf);
+    assert_eq!(invalid, None);
+}

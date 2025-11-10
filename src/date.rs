@@ -105,27 +105,43 @@ impl SauceDate {
 
     /// Parse an 8‑byte `YYYYMMDD` ASCII slice into a `SauceDate`.
     ///
-    /// Returns `None` if slice length != 8. Does not validate that each
-    /// byte is a digit nor the logical ranges of month/day.
+    /// Returns `None` if:
+    /// - Slice length != 8
+    /// - Any byte is not an ASCII digit ('0'-'9')
+    ///
+    /// Does not validate the logical ranges of month/day.
     ///
     /// ```
     /// use icy_sauce::SauceDate;
     /// assert!(SauceDate::from_bytes(b"20251108").is_some());
     /// assert!(SauceDate::from_bytes(b"2025").is_none());
+    /// assert!(SauceDate::from_bytes(b"ABCD1108").is_none()); // Non-digits rejected
     /// ```
     pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
         if bytes.len() != 8 {
             return None;
         }
-        let num = |pair: &[u8]| {
-            (pair[0].wrapping_sub(b'0') as u8) * 10 + (pair[1].wrapping_sub(b'0') as u8)
+        
+        // Validate all bytes are ASCII digits first
+        if !bytes.iter().all(|&b| b.is_ascii_digit()) {
+            return None;
+        }
+        
+        // Safe helper to convert two ASCII digits to a number
+        let parse_two_digits = |pair: &[u8]| -> u8 {
+            // We know these are valid digits from the check above
+            (pair[0] - b'0') * 10 + (pair[1] - b'0')
         };
+        
+        // Parse year (4 digits)
         let year = (bytes[0] - b'0') as i32 * 1000
             + (bytes[1] - b'0') as i32 * 100
             + (bytes[2] - b'0') as i32 * 10
             + (bytes[3] - b'0') as i32;
-        let month = num(&bytes[4..6]);
-        let day = num(&bytes[6..8]);
+            
+        let month = parse_two_digits(&bytes[4..6]);
+        let day = parse_two_digits(&bytes[6..8]);
+        
         Some(SauceDate { year, month, day })
     }
 
@@ -159,6 +175,7 @@ impl SauceDate {
         chrono::NaiveDate::from_ymd_opt(self.year, self.month as u32, self.day as u32)
     }
 }
+
 
 #[cfg(feature = "chrono")]
 impl From<chrono::NaiveDate> for SauceDate {
