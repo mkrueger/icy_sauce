@@ -15,7 +15,7 @@ SAUCE is a metadata format created in 1994 by ACiD Productions to standardize ho
 ## Features
 
 - **Full SAUCE Specification Support**: Implements the complete SAUCE v00 specification
-- **Multiple Format Support**: 
+- **Multiple Format Support**:
   - Character formats (ANSI, ASCII, PCBoard, Avatar, RipScript, etc.)
   - Binary text formats (BinaryText, XBin)
   - Graphics formats (GIF, PNG, JPG, PCX, etc.)
@@ -105,6 +105,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     caps.set_font(BString::from("IBM VGA"))?;
 
     let sauce = SauceRecordBuilder::default()
+        .title(BString::from("My Artwork"))?
+        .author(BString::from("Artist"))?
+        .group(BString::from("Art Group"))?
+        .date(SauceDate::new(2024, 1, 15))
+        .capabilities(Capabilities::Character(caps))?
+        .add_comment(BString::from("Created with love"))?
+        .build();
+
+    // Write to file with content
+    let mut output = Vec::new();
+    output.extend_from_slice(b"Your file content here...");
+    sauce.write(&mut output)?;
+    
+    Ok(())
+}
+```
 
 ### Stripping SAUCE Metadata
 
@@ -159,28 +175,11 @@ println!("Removed {} record(s), {} EOF byte(s); new length {}",
 
 If no SAUCE record is found, the original slice is returned unchanged.
 
-        .title(BString::from("My Artwork"))?
-        .author(BString::from("Artist"))?
-        .group(BString::from("Art Group"))?
-        .date(SauceDate::new(2024, 1, 15))
-        .capabilities(Capabilities::Character(caps))?
-        .add_comment(BString::from("Created with love"))?
-        .build();
-
-    // Write to file with content
-    let mut output = Vec::new();
-    output.extend_from_slice(b"Your file content here...");
-    sauce.write(&mut output)?;
-    
-    Ok(())
-}
-```
-
 ## Command Line Tool
 
 This library includes a command-line utility for inspecting SAUCE records in files. You can use it directly with `cargo run --example`:
 
-### Installation
+### CLI Installation
 
 ```bash
 cargo run --example print_sauce <FILE>
@@ -198,7 +197,7 @@ cargo run --example print_sauce artwork.ans -c -r
 
 ### Example Output
 
-```
+```text
 SAUCE Information for 'demo.ans'
 ============================================================
 Title:    Winter Scene
@@ -224,23 +223,28 @@ Comments (2):
 ## Supported Data Types
 
 ### Character Files
+
 - ASCII, ANSI, ANSiMation
 - PCBoard, Avatar, TundraDraw
 - RipScript, HTML, Source code
 
 ### Graphics Files
+
 - **Bitmap**: GIF, PCX, LBM/IFF, TGA, FLI/FLC, BMP, GL, DL, WPG, PNG, JPG, MPG, AVI
 - **Vector**: DXF, DWG, WPG, 3DS
 
 ### Binary Text
+
 - BinaryText (.BIN files) – even width (2–510), height derived from file size
 - XBin – explicit width & height (u16), no font or rendering flags
 
 ### Audio Files
+
 - Tracker: MOD, 669, STM, S3M, MTM, FAR, ULT, AMF, DMF, OKT, XM, IT
 - Other: ROL, CMF, MIDI, VOC, WAV, SMP
 
 ### Archives
+
 - ZIP, ARJ, LZH, ARC, TAR, ZOO, RAR, UC2, PAK, SQZ
 
 ## Advanced Usage
@@ -281,6 +285,7 @@ let xbin_caps = BinaryCapabilities::xbin(80, 50)?;
 ```
 
 To compute height of a BinaryText file after parsing:
+
 ```rust
 if let Some(h) = bin_caps.binary_text_height_from_file_size(record.file_size()) {
     println!("Derived height: {}", h);
@@ -306,7 +311,7 @@ use icy_sauce::prelude::*;
 let caps = AudioCapabilities { format: AudioFormat::S3m, sample_rate: 0 }; // tracker formats ignore sample_rate
 ```
 
-### Archive Files
+### Archives
 
 ```rust
 use icy_sauce::prelude::*;
@@ -365,7 +370,8 @@ match caps {
 
 ## Specifications
 
-Implements SAUCE v00. Spec:  
+Implements SAUCE v00.5 Spec:
+
 - [SAUCE Specification](http://www.acid.org/info/sauce/sauce.htm)
 
 ## License
