@@ -30,14 +30,12 @@ fn from_bytes_rejects_wrong_length() {
     assert!(SauceDate::from_bytes(b"202511080").is_none());
 }
 
-// from_bytes with non-digit characters (documents current wrapping behavior)
+// from_bytes with non-digit characters - should return None (digit validation)
 #[test]
 fn from_bytes_non_digit_bytes() {
-    let raw = b"A0B1C2D3"; // Not valid digits; wraps subtraction
-    let d = SauceDate::from_bytes(raw).unwrap();
-    // We assert only that parsing returns Some; exact numbers depend on wrapping math.
-    // If you later add digit validation, change this to assert None.
-    assert!(d.year >= 0); // Likely garbage but non-negative due to construction math
+    let raw = b"A0B1C2D3"; // Not valid digits
+    // Digit validation now rejects non-ASCII digit bytes
+    assert!(SauceDate::from_bytes(raw).is_none());
 }
 
 // Round-trip: write then parse

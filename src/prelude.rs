@@ -32,6 +32,8 @@
 //! - Date handling: [`SauceDate`]
 //! - Data type enum & error: [`SauceDataType`], [`SauceError`]
 //! - Result alias: [`Result`]
+//! - Metadata: [`MetaData`]
+//! - Strip functions: [`strip_sauce`], [`strip_sauce_mut`], [`strip_sauce_ex`], [`StripMode`], [`StripResult`]
 //! - Unified capabilities enum: [`Capabilities`]
 //! - Capability structs & format enums for all categories
 //!   - Character: [`CharacterCapabilities`], [`CharacterFormat`], [`LetterSpacing`], [`AspectRatio`]
@@ -67,13 +69,23 @@ pub use crate::{
     // Executable
     ExecutableCapabilities,
     LetterSpacing,
+    // Metadata
+    MetaData,
     Result,
     SauceDataType,
     SauceDate,
+    // Error
+    SauceError,
     // Core types
     SauceRecord,
     SauceRecordBuilder,
+    // Strip functions & types
+    StripMode,
+    StripResult,
     // Vector
     VectorCapabilities,
     VectorFormat,
+    strip_sauce,
+    strip_sauce_ex,
+    strip_sauce_mut,
 };

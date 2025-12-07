@@ -1,9 +1,10 @@
+use std::path::PathBuf;
+
 use bstr::BString;
-use thiserror::Error;
 
 use crate::SauceDataType;
 
-#[derive(Error, Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum SauceError {
     #[error("Unsupported SAUCE version: {0}")]
     UnsupportedSauceVersion(BString),
@@ -20,8 +21,12 @@ pub enum SauceError {
     #[error("Unsupported data type for operation: {0:?}")]
     UnsupportedDataType(SauceDataType),
 
-    #[error("IO error: {0}")]
-    IoError(std::io::Error),
+    #[error("IO error reading '{path}': {source}")]
+    IoError {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
 
     #[error("Comment limit exceeded (255)")]
     CommentLimitExceeded,
@@ -45,9 +50,12 @@ pub enum SauceError {
     MissingEofMarker,
 }
 
-impl From<std::io::Error> for SauceError {
-    #[inline]
-    fn from(err: std::io::Error) -> Self {
-        SauceError::IoError(err)
+impl SauceError {
+    /// Create an IoError with the given path and source error.
+    pub fn io_error(path: impl Into<PathBuf>, source: std::io::Error) -> Self {
+        SauceError::IoError {
+            path: path.into(),
+            source,
+        }
     }
 }

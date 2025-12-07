@@ -104,6 +104,36 @@ impl SauceRecordBuilder {
         Ok(self)
     }
 
+    /// Set the title field, truncating if too long.
+    ///
+    /// Unlike [`title`](Self::title), this method silently truncates the title
+    /// to 35 bytes if it exceeds the limit, logging a warning.
+    ///
+    /// # Arguments
+    ///
+    /// * `title` - The artwork title (will be truncated to 35 bytes if longer)
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use icy_sauce::SauceRecordBuilder;
+    /// # use bstr::BString;
+    /// let builder = SauceRecordBuilder::default()
+    ///     .title_truncate(BString::from("This is a very long title that exceeds the limit"));
+    /// ```
+    pub fn title_truncate(mut self, mut title: BString) -> Self {
+        if title.len() > limits::MAX_TITLE_LENGTH {
+            log::warn!(
+                "Title truncated from {} to {} bytes",
+                title.len(),
+                limits::MAX_TITLE_LENGTH
+            );
+            title.truncate(limits::MAX_TITLE_LENGTH);
+        }
+        self.header.title = title;
+        self
+    }
+
     /// Set the author field.
     ///
     /// # Arguments
@@ -131,6 +161,36 @@ impl SauceRecordBuilder {
         Ok(self)
     }
 
+    /// Set the author field, truncating if too long.
+    ///
+    /// Unlike [`author`](Self::author), this method silently truncates the author
+    /// to 20 bytes if it exceeds the limit, logging a warning.
+    ///
+    /// # Arguments
+    ///
+    /// * `author` - The creator's name or handle (will be truncated to 20 bytes if longer)
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use icy_sauce::SauceRecordBuilder;
+    /// # use bstr::BString;
+    /// let builder = SauceRecordBuilder::default()
+    ///     .author_truncate(BString::from("Very Long Author Name Here"));
+    /// ```
+    pub fn author_truncate(mut self, mut author: BString) -> Self {
+        if author.len() > limits::MAX_AUTHOR_LENGTH {
+            log::warn!(
+                "Author truncated from {} to {} bytes",
+                author.len(),
+                limits::MAX_AUTHOR_LENGTH
+            );
+            author.truncate(limits::MAX_AUTHOR_LENGTH);
+        }
+        self.header.author = author;
+        self
+    }
+
     /// Set the group field.
     ///
     /// # Arguments
@@ -156,6 +216,36 @@ impl SauceRecordBuilder {
         }
         self.header.group = group;
         Ok(self)
+    }
+
+    /// Set the group field, truncating if too long.
+    ///
+    /// Unlike [`group`](Self::group), this method silently truncates the group
+    /// to 20 bytes if it exceeds the limit, logging a warning.
+    ///
+    /// # Arguments
+    ///
+    /// * `group` - The group or organization name (will be truncated to 20 bytes if longer)
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use icy_sauce::SauceRecordBuilder;
+    /// # use bstr::BString;
+    /// let builder = SauceRecordBuilder::default()
+    ///     .group_truncate(BString::from("Very Long Group Name Here"));
+    /// ```
+    pub fn group_truncate(mut self, mut group: BString) -> Self {
+        if group.len() > limits::MAX_GROUP_LENGTH {
+            log::warn!(
+                "Group truncated from {} to {} bytes",
+                group.len(),
+                limits::MAX_GROUP_LENGTH
+            );
+            group.truncate(limits::MAX_GROUP_LENGTH);
+        }
+        self.header.group = group;
+        self
     }
 
     /// Set the creation date.

@@ -104,6 +104,7 @@ impl SauceRecord {
     /// Parsing is O(1) relative to the number of comments (bounded to 255) and otherwise
     /// proportional to the fixed header size. No heap allocations are performed except
     /// for copying comment lines and the header's owned strings.
+    #[must_use]
     pub fn from_bytes(data: &[u8]) -> crate::Result<Option<Self>> {
         let Some(header) = SauceHeader::from_bytes(data)? else {
             return Ok(None);
@@ -166,15 +167,20 @@ impl SauceRecord {
     /// # Errors
     /// I/O failures are wrapped in [`SauceError::IoError`]. Structural SAUCE issues yield
     /// specific `SauceError` variants.
+    #[must_use]
     pub fn from_path(path: &std::path::Path) -> crate::Result<Option<Self>> {
         const MAX_SAUCE_WINDOW: u64 = 128 + 5 + 255 * 64 + 1;
-        let mut f = File::open(path).map_err(crate::SauceError::IoError)?;
-        let file_len = f.metadata().map_err(crate::SauceError::IoError)?.len();
+        let mut f = File::open(path).map_err(|e| SauceError::io_error(path, e))?;
+        let file_len = f
+            .metadata()
+            .map_err(|e| SauceError::io_error(path, e))?
+            .len();
         let read_len = MAX_SAUCE_WINDOW.min(file_len);
         f.seek(SeekFrom::End(-(read_len as i64)))
-            .map_err(crate::SauceError::IoError)?;
+            .map_err(|e| SauceError::io_error(path, e))?;
         let mut buf = vec![0u8; read_len as usize];
-        f.read_exact(&mut buf).map_err(crate::SauceError::IoError)?;
+        f.read_exact(&mut buf)
+            .map_err(|e| SauceError::io_error(path, e))?;
         // Reuse existing logic
         Self::from_bytes(&buf)
     }
@@ -221,7 +227,7 @@ impl SauceRecord {
         // EOF Char.
         if eof {
             if let Err(err) = writer.write_all(&[0x1A]) {
-                return Err(SauceError::IoError(err));
+                return Err(SauceError::io_error("<writer>", err));
             }
         }
 
@@ -234,7 +240,7 @@ impl SauceRecord {
             }
             assert_eq!(comment_info.len(), length);
             if let Err(err) = writer.write_all(&comment_info) {
-                return Err(SauceError::IoError(err));
+                return Err(SauceError::io_error("<writer>", err));
             }
         }
         self.header.write(writer)?;

@@ -158,6 +158,24 @@ fn test_letter_spacing_aspect_ratio_roundtrip() {
     }
 }
 
+/// Test file AN-LD.ANS which has a malformed/missing SAUCE header.
+/// The file has EOF markers (0x1A) but the SAUCE magic bytes are missing.
+/// This documents a bug where the file appears to have metadata but lacks
+/// proper SAUCE structure.
+#[test]
+fn test_an_ld_ans_missing_sauce() {
+    let file = fs::read("tests/files/AN-LD.ANS").unwrap();
+    // This file does NOT have a valid SAUCE record -
+    // it has some trailing data that looks like metadata but lacks the "SAUCE" magic
+    let result = SauceRecord::from_bytes(&file).unwrap();
+
+    // The file should return None since there's no valid SAUCE header
+    assert!(
+        result.is_none(),
+        "AN-LD.ANS should not have valid SAUCE - missing SAUCE magic bytes"
+    );
+}
+
 use proptest::collection::vec;
 use proptest::proptest;
 

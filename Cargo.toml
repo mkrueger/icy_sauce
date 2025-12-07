@@ -12,7 +12,7 @@ keywords = ["ansi", "ansiart", "sauce"]
 [dependencies]
 thiserror = "2.0.17"
 bstr = "1.12.1"
-log = "0.4.28"
+log = "0.4.29"
 chrono = { version = "0.4.38", optional = true, default-features = false }
 
 [features]
@@ -21,7 +21,7 @@ default = []
 chrono = ["dep:chrono"]  # feature enabling chrono integration
 
 [dev-dependencies]
-clap = { version = "4.0", features = ["derive"] }
+clap = { version = "4.5.53", features = ["derive"] }
 proptest = "1.0"
 
 [[example]]

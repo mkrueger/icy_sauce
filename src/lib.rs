@@ -29,7 +29,7 @@ pub mod prelude; // public convenience re-exports
 pub(crate) mod util;
 
 #[repr(u8)]
-#[derive(Clone, Copy, Debug, PartialEq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum SauceDataType {
     /// None / Undefined (spec DataType 0)
     None = 0,
@@ -118,7 +118,7 @@ impl From<SauceDataType> for u8 {
 /// - Many SAUCE files have one EOF byte immediately before the SAUCE record
 /// - This library only removes EOF bytes directly associated with SAUCE records
 /// - Multiple/stacked EOF bytes are preserved (except the one tied to each record)
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StripMode {
     /// Strip only the last SAUCE record, preserve any EOF markers.
     ///
@@ -287,6 +287,7 @@ fn calculate_strip_position(data: &[u8], mode: StripMode) -> Option<usize> {
 /// StripMode::All result: "Content" + 0x1A + 0x1A + SAUCE2
 /// (SAUCE1 removed, SAUCE2 preserved due to double EOF barrier)
 /// ```
+#[must_use]
 pub fn strip_sauce(data: &[u8], mode: StripMode) -> &[u8] {
     let pos = calculate_strip_position(data, mode).unwrap_or(data.len());
     &data[..pos]
@@ -305,6 +306,7 @@ pub fn strip_sauce(data: &[u8], mode: StripMode) -> &[u8] {
 /// let cleaned = strip_sauce_mut(&mut file_data, StripMode::default());
 /// cleaned[0] = 66; // Change first 'A' to 'B'
 /// ```
+#[must_use]
 pub fn strip_sauce_mut(data: &mut [u8], mode: StripMode) -> &mut [u8] {
     let pos = calculate_strip_position(data, mode).unwrap_or(data.len());
     &mut data[..pos]
@@ -313,7 +315,7 @@ pub fn strip_sauce_mut(data: &mut [u8], mode: StripMode) -> &mut [u8] {
 /// Extended strip result with metadata about what was removed.
 ///
 /// Returned by [`strip_sauce_ex`] to provide details about the stripping operation.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StripResult<'a> {
     /// The data with SAUCE/EOF removed
     pub data: &'a [u8],
@@ -349,6 +351,7 @@ impl<'a> StripResult<'a> {
 ///              result.bytes_removed(file_data.len()));
 /// }
 /// ```
+#[must_use]
 pub fn strip_sauce_ex(data: &[u8], mode: StripMode) -> StripResult<'_> {
     let mut records = 0;
     let mut eof_count = 0;

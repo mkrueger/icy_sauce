@@ -168,6 +168,7 @@ impl SauceHeader {
     /// }
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
+    #[must_use]
     pub fn from_bytes(data: &[u8]) -> crate::Result<Option<Self>> {
         if data.len() < HDR_LEN {
             return Ok(None);
@@ -210,7 +211,11 @@ impl SauceHeader {
         let t_flags = header[11];
         header = &header[12..];
 
-        assert_eq!(header.len(), TINFO_LEN);
+        // Sanity check: remaining slice must be exactly 22 bytes for TInfoS.
+        // This cannot fail at runtime since all offsets are derived from the fixed
+        // 128-byte header structure, but catches offset calculation errors during development.
+        debug_assert_eq!(header.len(), TINFO_LEN);
+
         let t_info_s = zero_trim(header); // zero-padded field
         Ok(Some(Self {
             title,
@@ -316,10 +321,13 @@ impl SauceHeader {
         sauce_info.push(self.t_flags);
         sauce_info.extend(zero_pad(&self.t_info_s, TINFO_LEN));
 
-        assert_eq!(sauce_info.len(), HDR_LEN);
+        // Sanity check: serialized header must be exactly 128 bytes.
+        // This cannot fail at runtime since all field sizes are fixed constants,
+        // but catches serialization errors during development.
+        debug_assert_eq!(sauce_info.len(), HDR_LEN);
 
         if let Err(err) = writer.write_all(&sauce_info) {
-            return Err(SauceError::IoError(err));
+            return Err(SauceError::io_error("<writer>", err));
         }
         Ok(())
     }

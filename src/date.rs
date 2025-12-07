@@ -66,7 +66,7 @@
 //! # }
 //! ```
 
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SauceDate {
     /// Full 4‑digit year (0–9999 typical; values outside are allowed but will
     /// trigger the fallback branch in `Display`).
@@ -117,31 +117,32 @@ impl SauceDate {
     /// assert!(SauceDate::from_bytes(b"2025").is_none());
     /// assert!(SauceDate::from_bytes(b"ABCD1108").is_none()); // Non-digits rejected
     /// ```
+    #[must_use]
     pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
         if bytes.len() != 8 {
             return None;
         }
-        
+
         // Validate all bytes are ASCII digits first
         if !bytes.iter().all(|&b| b.is_ascii_digit()) {
             return None;
         }
-        
+
         // Safe helper to convert two ASCII digits to a number
         let parse_two_digits = |pair: &[u8]| -> u8 {
             // We know these are valid digits from the check above
             (pair[0] - b'0') * 10 + (pair[1] - b'0')
         };
-        
+
         // Parse year (4 digits)
         let year = (bytes[0] - b'0') as i32 * 1000
             + (bytes[1] - b'0') as i32 * 100
             + (bytes[2] - b'0') as i32 * 10
             + (bytes[3] - b'0') as i32;
-            
+
         let month = parse_two_digits(&bytes[4..6]);
         let day = parse_two_digits(&bytes[6..8]);
-        
+
         Some(SauceDate { year, month, day })
     }
 
@@ -154,7 +155,8 @@ impl SauceDate {
     /// assert_eq!(&buf, b"20251108");
     /// ```
     pub fn write<A: std::io::Write>(&self, writer: &mut A) -> crate::Result<()> {
-        write!(writer, "{:04}{:02}{:02}", self.year, self.month, self.day)?;
+        write!(writer, "{:04}{:02}{:02}", self.year, self.month, self.day)
+            .map_err(|e| crate::SauceError::io_error("<date>", e))?;
         Ok(())
     }
 
@@ -175,7 +177,6 @@ impl SauceDate {
         chrono::NaiveDate::from_ymd_opt(self.year, self.month as u32, self.day as u32)
     }
 }
-
 
 #[cfg(feature = "chrono")]
 impl From<chrono::NaiveDate> for SauceDate {
