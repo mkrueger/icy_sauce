@@ -29,7 +29,7 @@ use crate::SauceRecordBuilder;
 /// };
 /// assert!(!meta.is_empty());
 /// ```
-#[derive(Default, Clone, PartialEq)]
+#[derive(Debug, Default, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct MetaData {
     /// The title of the file (space-trimmed)
