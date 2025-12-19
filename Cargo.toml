@@ -1,29 +1,19 @@
-[package]
-name = "icy_sauce"
-version = "0.3.5"
+[workspace]
+resolver = "3"
+members = ["crates/icy_sauce", "crates/icy_sauce_cli"]
+
+[workspace.package]
 edition = "2024"
 authors = ["Mike Krüger <mkrueger@posteo.de>"]
-description = "Library for handling SAUCE – Standard Architecture for Universal Comment Extensions"
 homepage = "https://github.com/mkrueger/icy_sauce"
 repository = "https://github.com/mkrueger/icy_sauce"
 license-file = "LICENSE"
-keywords = ["ansi", "ansiart", "sauce"]
 
-[dependencies]
-thiserror = "2.0.17"
-bstr = "1.12.1"
-log = "0.4.29"
-chrono = { version = "0.4.38", optional = true, default-features = false }
-
-[features]
-# Default stays lean; users can opt into faster trimming.
-default = []
-chrono = ["dep:chrono"]  # feature enabling chrono integration
-
-[dev-dependencies]
-clap = { version = "4.5.53", features = ["derive"] }
+[workspace.dependencies]
+thiserror = "2.0"
+bstr = { version = "1.12", features = ["serde"] }
+log = "0.4"
+chrono = { version = "0.4", default-features = false }
+clap = { version = "4.5", features = ["derive"] }
 proptest = "1.0"
-
-[[example]]
-name = "print_sauce"
-path = "example/print_sauce.rs"
+serde = { version = "1.0", features = ["derive"] }

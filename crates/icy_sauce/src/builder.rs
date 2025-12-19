@@ -450,4 +450,135 @@ impl SauceRecordBuilder {
             cached_caps: std::cell::OnceCell::new(),
         }
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Raw field setters for advanced/low-level usage
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Set the raw FileType field (0-255).
+    ///
+    /// This is a low-level method for setting the FileType byte directly.
+    /// For type-safe usage, prefer [`capabilities`](Self::capabilities).
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use icy_sauce::SauceRecordBuilder;
+    /// let builder = SauceRecordBuilder::default()
+    ///     .file_type(1); // ANSI for Character data type
+    /// ```
+    pub fn file_type(mut self, file_type: u8) -> Self {
+        self.header.file_type = file_type;
+        self
+    }
+
+    /// Set the raw TInfo1 field (16-bit).
+    ///
+    /// Interpretation depends on DataType/FileType. For Character types,
+    /// this typically represents width/columns.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use icy_sauce::SauceRecordBuilder;
+    /// let builder = SauceRecordBuilder::default()
+    ///     .t_info1(80); // 80 columns
+    /// ```
+    pub fn t_info1(mut self, value: u16) -> Self {
+        self.header.t_info1 = value;
+        self
+    }
+
+    /// Set the raw TInfo2 field (16-bit).
+    ///
+    /// Interpretation depends on DataType/FileType. For Character types,
+    /// this typically represents height/lines.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use icy_sauce::SauceRecordBuilder;
+    /// let builder = SauceRecordBuilder::default()
+    ///     .t_info2(25); // 25 lines
+    /// ```
+    pub fn t_info2(mut self, value: u16) -> Self {
+        self.header.t_info2 = value;
+        self
+    }
+
+    /// Set the raw TInfo3 field (16-bit).
+    ///
+    /// Interpretation depends on DataType/FileType. For Bitmap types,
+    /// this typically represents pixel depth.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use icy_sauce::SauceRecordBuilder;
+    /// let builder = SauceRecordBuilder::default()
+    ///     .t_info3(24); // 24-bit color depth
+    /// ```
+    pub fn t_info3(mut self, value: u16) -> Self {
+        self.header.t_info3 = value;
+        self
+    }
+
+    /// Set the raw TInfo4 field (16-bit).
+    ///
+    /// Interpretation depends on DataType/FileType. For Audio types,
+    /// this may represent sample rate.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use icy_sauce::SauceRecordBuilder;
+    /// let builder = SauceRecordBuilder::default()
+    ///     .t_info4(44100); // 44.1kHz sample rate
+    /// ```
+    pub fn t_info4(mut self, value: u16) -> Self {
+        self.header.t_info4 = value;
+        self
+    }
+
+    /// Set the raw TFlags field (8-bit).
+    ///
+    /// For Character types, this encodes ANSiFlags (ICE colors, letter spacing,
+    /// aspect ratio). See SAUCE specification for bit layout.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use icy_sauce::SauceRecordBuilder;
+    /// let builder = SauceRecordBuilder::default()
+    ///     .t_flags(0b00010001); // ICE colors + 9px letter spacing
+    /// ```
+    pub fn t_flags(mut self, flags: u8) -> Self {
+        self.header.t_flags = flags;
+        self
+    }
+
+    /// Set the raw TInfoS field (up to 22 bytes, zero-padded).
+    ///
+    /// For Character types, this typically contains the font name.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SauceError::TInfoSTooLong`] if the string exceeds 22 bytes.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use icy_sauce::SauceRecordBuilder;
+    /// # use bstr::BString;
+    /// let builder = SauceRecordBuilder::default()
+    ///     .t_info_s(BString::from("IBM VGA"))?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn t_info_s(mut self, value: BString) -> crate::Result<Self> {
+        if value.len() > crate::header::TINFO_LEN {
+            return Err(SauceError::TInfoSTooLong(value.len()));
+        }
+        self.header.t_info_s = value;
+        Ok(self)
+    }
 }

@@ -1,0 +1,25 @@
+[package]
+name = "icy_sauce"
+version = "0.3.6"
+edition.workspace = true
+authors.workspace = true
+description = "Library for handling SAUCE – Standard Architecture for Universal Comment Extensions"
+homepage.workspace = true
+repository.workspace = true
+license-file = "../../LICENSE"
+keywords = ["ansi", "ansiart", "sauce"]
+
+[dependencies]
+thiserror.workspace = true
+bstr.workspace = true
+log.workspace = true
+chrono = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+
+[features]
+default = []
+chrono = ["dep:chrono"]
+serde = ["dep:serde", "bstr/serde"]
+
+[dev-dependencies]
+proptest.workspace = true

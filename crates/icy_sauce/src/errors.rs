@@ -46,6 +46,9 @@ pub enum SauceError {
     #[error("Font name too long: {0} bytes only up to 22 bytes are allowed.")]
     FontNameTooLong(usize),
 
+    #[error("TInfoS too long: {0} bytes only up to 22 bytes are allowed.")]
+    TInfoSTooLong(usize),
+
     #[error("Missing EOF marker (0x1A) before SAUCE record")]
     MissingEofMarker,
 }
