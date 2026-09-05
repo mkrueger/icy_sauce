@@ -117,7 +117,8 @@ impl From<SauceDataType> for u8 {
 /// - EOF markers (0x1A bytes) were used in DOS to mark end-of-file
 /// - Many SAUCE files have one EOF byte immediately before the SAUCE record
 /// - This library only removes EOF bytes directly associated with SAUCE records
-/// - Multiple/stacked EOF bytes are preserved (except the one tied to each record)
+/// - Multiple/stacked EOF bytes are preserved except for those explicitly removed
+///   by the selected mode
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StripMode {
     /// Strip only the last SAUCE record, preserve any EOF markers.
@@ -139,31 +140,32 @@ pub enum StripMode {
     /// ```
     LastStripFinalEof,
 
-    /// Strip all contiguous SAUCE records, preserve trailing EOF markers.
+    /// Strip all contiguous SAUCE records and one preceding EOF per record.
+    /// Additional EOF markers are preserved.
     ///
     /// Records are considered contiguous only if separated by at most one EOF.
     /// Multiple EOF bytes between records will stop the iteration.
     ///
     /// # Example
     /// ```text
-    /// Before: "Content" + 0x1A + SAUCE1 + 0x1A + SAUCE2 + 0x1A
-    /// After:  "Content" + 0x1A
+    /// Before: "Content" + 0x1A + SAUCE1 + 0x1A + SAUCE2
+    /// After:  "Content"
     ///
     /// But with multiple EOFs:
     /// Before: "Content" + 0x1A + SAUCE1 + 0x1A + 0x1A + SAUCE2
-    /// After:  "Content" + 0x1A + 0x1A + SAUCE2
-    ///         (iteration stops at double EOF)
+    /// After:  "Content" + 0x1A + SAUCE1 + 0x1A
+    ///         (SAUCE2 and its EOF are removed; the extra EOF blocks SAUCE1)
     /// ```
     All,
 
     /// Strip all contiguous SAUCE records and final EOF marker.
     ///
-    /// Like `All`, but also removes one trailing EOF after the last removed record.
+    /// Like `All`, but also removes one additional EOF from the remaining data.
     /// Most aggressive cleaning mode.
     ///
     /// # Example
     /// ```text
-    /// Before: "Content" + 0x1A + SAUCE1 + 0x1A + SAUCE2 + 0x1A
+    /// Before: "Content" + 0x1A + 0x1A + SAUCE1 + 0x1A + SAUCE2
     /// After:  "Content"
     /// ```
     AllStripFinalEof,
@@ -284,9 +286,12 @@ fn calculate_strip_position(data: &[u8], mode: StripMode) -> Option<usize> {
 /// Input:  "Content" + 0x1A + SAUCE1 + 0x1A + 0x1A + SAUCE2
 ///                     ^one EOF        ^double EOF (stops here)
 ///
-/// StripMode::All result: "Content" + 0x1A + 0x1A + SAUCE2
-/// (SAUCE1 removed, SAUCE2 preserved due to double EOF barrier)
+/// StripMode::All result: "Content" + 0x1A + SAUCE1 + 0x1A
+/// (SAUCE2 removed; the extra EOF prevents stripping SAUCE1)
 /// ```
+///
+/// Headers must be at the exact end of the input. An EOF after the final header
+/// prevents stripping in every mode.
 #[must_use]
 pub fn strip_sauce(data: &[u8], mode: StripMode) -> &[u8] {
     let pos = calculate_strip_position(data, mode).unwrap_or(data.len());

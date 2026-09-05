@@ -275,7 +275,8 @@ impl SauceHeader {
     ///
     /// # Errors
     ///
-    /// Returns [`SauceError::IoError`] if writing fails.
+    /// Returns [`SauceError::IoError`] if writing fails, or
+    /// [`SauceError::UnsupportedSauceDate`] if the date cannot fit the wire format.
     ///
     /// # Comments Handling
     ///

@@ -7,7 +7,7 @@ fn create_sauce_record() -> Vec<u8> {
         .title(BString::from("Test"))
         .unwrap()
         .build();
-    sauce.to_bytes()
+    sauce.to_bytes().unwrap()
 }
 
 /// Helper to create SAUCE with comment block
@@ -19,7 +19,7 @@ fn create_sauce_with_comments(num_comments: u8) -> Vec<u8> {
             .unwrap();
     }
     let sauce = builder.build();
-    sauce.to_bytes()
+    sauce.to_bytes().unwrap()
 }
 
 #[test]
@@ -103,7 +103,7 @@ fn test_last_mode_no_eof() {
         .title(BString::from("Test"))
         .unwrap()
         .build();
-    data.extend_from_slice(&sauce.to_bytes_without_eof());
+    data.extend_from_slice(&sauce.to_bytes_without_eof().unwrap());
 
     let stripped = strip_sauce(&data, StripMode::LastStripFinalEof);
     assert_eq!(stripped, b"Content");
@@ -358,7 +358,7 @@ fn test_last_preserve_eof_with_no_eof() {
         .title(BString::from("Test"))
         .unwrap()
         .build();
-    data.extend_from_slice(&sauce.to_bytes_without_eof());
+    data.extend_from_slice(&sauce.to_bytes_without_eof().unwrap());
 
     let stripped = strip_sauce(&data, StripMode::Last);
     assert_eq!(stripped, b"Content");

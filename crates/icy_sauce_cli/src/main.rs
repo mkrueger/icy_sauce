@@ -4,7 +4,12 @@ use icy_sauce::{
     Capabilities, SauceDataType, SauceDate, SauceRecord, SauceRecordBuilder, StripMode, strip_sauce,
 };
 use serde::{Deserialize, Serialize};
-use std::{fs, io::Read, path::PathBuf, process::ExitCode};
+use std::{
+    fs,
+    io::{self, Read, Write},
+    path::{Path, PathBuf},
+    process::ExitCode,
+};
 
 /// JSON representation of SAUCE metadata
 #[derive(Serialize, Deserialize, Default)]
@@ -17,8 +22,8 @@ struct SauceJson {
     group: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     date: Option<String>,
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    comments: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    comments: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     file_size: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -57,11 +62,13 @@ impl SauceJson {
             author: Some(sauce.author().to_str_lossy().into_owned()),
             group: Some(sauce.group().to_str_lossy().into_owned()),
             date: date_str,
-            comments: sauce
-                .comments()
-                .iter()
-                .map(|c| c.to_str_lossy().into_owned())
-                .collect(),
+            comments: Some(
+                sauce
+                    .comments()
+                    .iter()
+                    .map(|c| c.to_str_lossy().into_owned())
+                    .collect(),
+            ),
             file_size: Some(sauce.file_size()),
             data_type: Some(u8::from(header.data_type)),
             file_type: Some(header.file_type),
@@ -76,6 +83,79 @@ impl SauceJson {
                 Some(header.t_info_s.to_str_lossy().into_owned())
             },
         }
+    }
+
+    /// Resolve precedence before validation so overridden values are ignored.
+    fn overlay(self, overrides: Self) -> Self {
+        Self {
+            title: overrides.title.or(self.title),
+            author: overrides.author.or(self.author),
+            group: overrides.group.or(self.group),
+            date: overrides.date.or(self.date),
+            comments: overrides.comments.or(self.comments),
+            file_size: overrides.file_size.or(self.file_size),
+            data_type: overrides.data_type.or(self.data_type),
+            file_type: overrides.file_type.or(self.file_type),
+            tinfo1: overrides.tinfo1.or(self.tinfo1),
+            tinfo2: overrides.tinfo2.or(self.tinfo2),
+            tinfo3: overrides.tinfo3.or(self.tinfo3),
+            tinfo4: overrides.tinfo4.or(self.tinfo4),
+            tflags: overrides.tflags.or(self.tflags),
+            tinfos: overrides.tinfos.or(self.tinfos),
+        }
+    }
+
+    /// Apply only supplied fields, preserving untouched bytes and raw fields.
+    fn apply_to(
+        self,
+        mut builder: SauceRecordBuilder,
+    ) -> Result<SauceRecordBuilder, Box<dyn std::error::Error>> {
+        if let Some(value) = self.title {
+            builder = builder.title(value.into())?;
+        }
+        if let Some(value) = self.author {
+            builder = builder.author(value.into())?;
+        }
+        if let Some(value) = self.group {
+            builder = builder.group(value.into())?;
+        }
+        if let Some(value) = self.date {
+            builder = builder.date(parse_date(&value)?);
+        }
+        if let Some(values) = self.comments {
+            builder = builder.clear_comments();
+            for value in values {
+                builder = builder.add_comment(value.into())?;
+            }
+        }
+        if let Some(value) = self.file_size {
+            builder = builder.file_size(value);
+        }
+        if let Some(value) = self.data_type {
+            builder = builder.data_type(SauceDataType::from(value));
+        }
+        if let Some(value) = self.file_type {
+            builder = builder.file_type(value);
+        }
+        if let Some(value) = self.tinfo1 {
+            builder = builder.t_info1(value);
+        }
+        if let Some(value) = self.tinfo2 {
+            builder = builder.t_info2(value);
+        }
+        if let Some(value) = self.tinfo3 {
+            builder = builder.t_info3(value);
+        }
+        if let Some(value) = self.tinfo4 {
+            builder = builder.t_info4(value);
+        }
+        if let Some(value) = self.tflags {
+            builder = builder.t_flags(value);
+        }
+        if let Some(value) = self.tinfos {
+            builder = builder.t_info_s(value.into())?;
+        }
+        Ok(builder)
     }
 }
 
@@ -118,15 +198,15 @@ enum Commands {
         #[arg(long, value_name = "FILE")]
         from_json: Option<String>,
 
-        /// Title (max 35 characters)
+        /// Title (max 35 bytes)
         #[arg(short, long)]
         title: Option<String>,
 
-        /// Author (max 20 characters)
+        /// Author (max 20 bytes)
         #[arg(short, long)]
         author: Option<String>,
 
-        /// Group (max 20 characters)
+        /// Group (max 20 bytes)
         #[arg(short, long)]
         group: Option<String>,
 
@@ -134,7 +214,7 @@ enum Commands {
         #[arg(short, long)]
         date: Option<String>,
 
-        /// Comments (can be specified multiple times)
+        /// Comments (repeatable; replaces JSON comments when supplied)
         #[arg(long)]
         comment: Vec<String>,
 
@@ -187,15 +267,15 @@ enum Commands {
         #[arg(long, value_name = "FILE")]
         from_json: Option<String>,
 
-        /// New title (max 35 characters)
+        /// New title (max 35 bytes)
         #[arg(short, long)]
         title: Option<String>,
 
-        /// New author (max 20 characters)
+        /// New author (max 20 bytes)
         #[arg(short, long)]
         author: Option<String>,
 
-        /// New group (max 20 characters)
+        /// New group (max 20 bytes)
         #[arg(short, long)]
         group: Option<String>,
 
@@ -496,16 +576,51 @@ fn print_raw(sauce: &SauceRecord) {
 }
 
 fn parse_date(date_str: &str) -> Result<SauceDate, Box<dyn std::error::Error>> {
-    let cleaned = date_str.replace('-', "");
-    if cleaned.len() != 8 {
-        return Err("Date must be in YYYYMMDD or YYYY-MM-DD format".into());
+    let bytes = date_str.as_bytes();
+    let mut compact = [0; 8];
+    let digits = match bytes.len() {
+        8 => bytes,
+        10 if bytes[4] == b'-' && bytes[7] == b'-' => {
+            compact[..4].copy_from_slice(&bytes[..4]);
+            compact[4..6].copy_from_slice(&bytes[5..7]);
+            compact[6..].copy_from_slice(&bytes[8..]);
+            &compact
+        }
+        _ => return Err("Date must be in YYYYMMDD or YYYY-MM-DD format".into()),
+    };
+    SauceDate::from_bytes(digits)
+        .ok_or_else(|| "Date must be in YYYYMMDD or YYYY-MM-DD format using ASCII digits".into())
+}
+
+/// Replace a file atomically, preserving its permissions and following symlinks.
+/// A failed write leaves the original intact; the temporary file is cleaned up.
+fn write_atomic(
+    file: &Path,
+    write: impl FnOnce(&mut fs::File) -> io::Result<()>,
+) -> io::Result<()> {
+    let path = fs::canonicalize(file)?;
+    // Check write access without truncating; rename alone would also replace
+    // read-only files when the containing directory is writable.
+    let original = fs::OpenOptions::new().write(true).open(&path)?;
+    let metadata = original.metadata()?;
+    if !metadata.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Not a regular file",
+        ));
     }
-
-    let year: i32 = cleaned[0..4].parse()?;
-    let month: u8 = cleaned[4..6].parse()?;
-    let day: u8 = cleaned[6..8].parse()?;
-
-    Ok(SauceDate::new(year, month, day))
+    let parent = path.parent().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "File has no parent directory")
+    })?;
+    let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
+    write(temporary.as_file_mut())?;
+    temporary
+        .as_file()
+        .set_permissions(metadata.permissions())?;
+    temporary.as_file().sync_all()?;
+    drop(original);
+    temporary.persist(&path).map_err(|error| error.error)?;
+    Ok(())
 }
 
 /// Read JSON from a file path or stdin (if path is "-")
@@ -556,102 +671,35 @@ fn add_sauce(
         data
     };
 
-    let mut builder = SauceRecordBuilder::default();
-
-    // Apply JSON values first, then override with CLI arguments
-    if let Some(ref j) = json {
-        if let Some(ref t) = j.title {
-            builder = builder.title(BString::from(t.as_str()))?;
-        }
-        if let Some(ref a) = j.author {
-            builder = builder.author(BString::from(a.as_str()))?;
-        }
-        if let Some(ref g) = j.group {
-            builder = builder.group(BString::from(g.as_str()))?;
-        }
-        if let Some(ref d) = j.date {
-            builder = builder.date(parse_date(d)?);
-        }
-        for c in &j.comments {
-            builder = builder.add_comment(BString::from(c.as_str()))?;
-        }
-        if let Some(dt) = j.data_type {
-            builder = builder.data_type(SauceDataType::from(dt));
-        }
-        if let Some(ft) = j.file_type {
-            builder = builder.file_type(ft);
-        }
-        if let Some(v) = j.tinfo1 {
-            builder = builder.t_info1(v);
-        }
-        if let Some(v) = j.tinfo2 {
-            builder = builder.t_info2(v);
-        }
-        if let Some(v) = j.tinfo3 {
-            builder = builder.t_info3(v);
-        }
-        if let Some(v) = j.tinfo4 {
-            builder = builder.t_info4(v);
-        }
-        if let Some(f) = j.tflags {
-            builder = builder.t_flags(f);
-        }
-        if let Some(ref s) = j.tinfos {
-            builder = builder.t_info_s(BString::from(s.as_str()))?;
-        }
-    }
-
-    // CLI arguments override JSON values
-    if let Some(t) = title {
-        builder = builder.title(BString::from(t))?;
-    }
-    if let Some(a) = author {
-        builder = builder.author(BString::from(a))?;
-    }
-    if let Some(g) = group {
-        builder = builder.group(BString::from(g))?;
-    }
-    if let Some(d) = date {
-        builder = builder.date(parse_date(&d)?);
-    }
-    // Only add CLI comments if no JSON was provided (to avoid duplicates)
-    if json.is_none() {
-        for c in comments {
-            builder = builder.add_comment(BString::from(c))?;
-        }
-    }
-
-    // Set raw fields if provided
-    if let Some(dt) = data_type {
-        builder = builder.data_type(SauceDataType::from(dt));
-    }
-    if let Some(ft) = file_type {
-        builder = builder.file_type(ft);
-    }
-    if let Some(v) = tinfo1 {
-        builder = builder.t_info1(v);
-    }
-    if let Some(v) = tinfo2 {
-        builder = builder.t_info2(v);
-    }
-    if let Some(v) = tinfo3 {
-        builder = builder.t_info3(v);
-    }
-    if let Some(v) = tinfo4 {
-        builder = builder.t_info4(v);
-    }
-    if let Some(f) = tflags {
-        builder = builder.t_flags(f);
-    }
-    if let Some(s) = tinfos {
-        builder = builder.t_info_s(BString::from(s))?;
-    }
+    // Zero denotes an unknown size for payloads too large for the wire field.
+    let builder =
+        SauceRecordBuilder::default().file_size(u32::try_from(content.len()).unwrap_or(0));
+    let overrides = SauceJson {
+        title,
+        author,
+        group,
+        date,
+        comments: (!comments.is_empty()).then_some(comments),
+        data_type,
+        file_type,
+        tinfo1,
+        tinfo2,
+        tinfo3,
+        tinfo4,
+        tflags,
+        tinfos,
+        ..Default::default()
+    };
+    let builder = json
+        .unwrap_or_default()
+        .overlay(overrides)
+        .apply_to(builder)?;
 
     let sauce = builder.build();
 
     let mut output = content;
     sauce.write(&mut output)?;
-    fs::write(file, output)?;
+    write_atomic(file, |writer| writer.write_all(&output))?;
 
     println!("SAUCE metadata added to '{}'", file.display());
     Ok(())
@@ -685,140 +733,34 @@ fn alter_sauce(
         return Err("No SAUCE record found. Use 'add' command to create one.".into());
     };
 
-    // Check if any raw field is being set (from CLI or JSON)
-    let using_raw_fields = data_type.is_some()
-        || file_type.is_some()
-        || tinfo1.is_some()
-        || tinfo2.is_some()
-        || tinfo3.is_some()
-        || tinfo4.is_some()
-        || tflags.is_some()
-        || tinfos.is_some()
-        || json.as_ref().map_or(false, |j| {
-            j.data_type.is_some()
-                || j.file_type.is_some()
-                || j.tinfo1.is_some()
-                || j.tinfo2.is_some()
-                || j.tinfo3.is_some()
-                || j.tinfo4.is_some()
-                || j.tflags.is_some()
-                || j.tinfos.is_some()
-        });
-
     // Strip the existing SAUCE to get the content
     let content = strip_sauce(&data, StripMode::LastStripFinalEof);
 
-    let mut builder = SauceRecordBuilder::default();
-
-    // Determine final values: CLI overrides JSON, JSON overrides existing
-    let final_title = title
-        .or_else(|| json.as_ref().and_then(|j| j.title.clone()))
-        .unwrap_or_else(|| existing.title().to_string());
-    let final_author = author
-        .or_else(|| json.as_ref().and_then(|j| j.author.clone()))
-        .unwrap_or_else(|| existing.author().to_string());
-    let final_group = group
-        .or_else(|| json.as_ref().and_then(|j| j.group.clone()))
-        .unwrap_or_else(|| existing.group().to_string());
-
-    // Use new values or keep existing ones
-    builder = builder.title(BString::from(final_title))?;
-    builder = builder.author(BString::from(final_author))?;
-    builder = builder.group(BString::from(final_group))?;
-
-    // Handle date: CLI > JSON > existing
-    if let Some(d) = date {
-        builder = builder.date(parse_date(&d)?);
-    } else if let Some(ref j) = json {
-        if let Some(ref d) = j.date {
-            builder = builder.date(parse_date(d)?);
+    // Preserve all untouched byte strings, file size, and raw format fields.
+    let overrides = SauceJson {
+        title,
+        author,
+        group,
+        date,
+        comments: if clear_comments {
+            Some(Vec::new())
         } else {
-            let d = existing.date();
-            if d.year != 0 || d.month != 0 || d.day != 0 {
-                builder = builder.date(d);
-            }
-        }
-    } else {
-        let d = existing.date();
-        if d.year != 0 || d.month != 0 || d.day != 0 {
-            builder = builder.date(d);
-        }
-    }
-
-    // Handle capabilities vs raw fields
-    if using_raw_fields {
-        // When using raw fields, set them directly instead of using capabilities
-        // First copy existing raw values from the header
-        let header = existing.header();
-
-        // For each field: CLI > JSON > existing
-        let final_data_type = data_type
-            .or_else(|| json.as_ref().and_then(|j| j.data_type))
-            .map(SauceDataType::from)
-            .unwrap_or(header.data_type);
-        let final_file_type = file_type
-            .or_else(|| json.as_ref().and_then(|j| j.file_type))
-            .unwrap_or(header.file_type);
-        let final_tinfo1 = tinfo1
-            .or_else(|| json.as_ref().and_then(|j| j.tinfo1))
-            .unwrap_or(header.t_info1);
-        let final_tinfo2 = tinfo2
-            .or_else(|| json.as_ref().and_then(|j| j.tinfo2))
-            .unwrap_or(header.t_info2);
-        let final_tinfo3 = tinfo3
-            .or_else(|| json.as_ref().and_then(|j| j.tinfo3))
-            .unwrap_or(header.t_info3);
-        let final_tinfo4 = tinfo4
-            .or_else(|| json.as_ref().and_then(|j| j.tinfo4))
-            .unwrap_or(header.t_info4);
-        let final_tflags = tflags
-            .or_else(|| json.as_ref().and_then(|j| j.tflags))
-            .unwrap_or(header.t_flags);
-        let final_tinfos = tinfos
-            .or_else(|| json.as_ref().and_then(|j| j.tinfos.clone()))
-            .map(BString::from)
-            .unwrap_or_else(|| header.t_info_s.clone());
-
-        builder = builder.data_type(final_data_type);
-        builder = builder.file_type(final_file_type);
-        builder = builder.t_info1(final_tinfo1);
-        builder = builder.t_info2(final_tinfo2);
-        builder = builder.t_info3(final_tinfo3);
-        builder = builder.t_info4(final_tinfo4);
-        builder = builder.t_flags(final_tflags);
-        builder = builder.t_info_s(final_tinfos)?;
-    } else {
-        // Preserve capabilities when not using raw fields
-        if let Some(caps) = existing.capabilities() {
-            builder = builder.capabilities(caps)?;
-        }
-    }
-
-    // Handle comments: clear_comments > replace_comments > json.comments > existing
-    if clear_comments {
-        // Don't add any comments
-    } else if !replace_comments.is_empty() {
-        for c in replace_comments {
-            builder = builder.add_comment(BString::from(c))?;
-        }
-    } else if let Some(ref j) = json {
-        // Use JSON comments if provided
-        if !j.comments.is_empty() {
-            for c in &j.comments {
-                builder = builder.add_comment(BString::from(c.as_str()))?;
-            }
-        } else {
-            // Keep existing comments
-            for c in existing.comments() {
-                builder = builder.add_comment(c.clone())?;
-            }
-        }
-    } else {
-        // Keep existing comments and optionally add new ones
-        for c in existing.comments() {
-            builder = builder.add_comment(c.clone())?;
-        }
-    }
+            (!replace_comments.is_empty()).then_some(replace_comments)
+        },
+        data_type,
+        file_type,
+        tinfo1,
+        tinfo2,
+        tinfo3,
+        tinfo4,
+        tflags,
+        tinfos,
+        ..Default::default()
+    };
+    let mut builder = json
+        .unwrap_or_default()
+        .overlay(overrides)
+        .apply_to(existing.to_builder())?;
 
     // Add new comments (always added on top of the above)
     for c in add_comments {
@@ -829,7 +771,7 @@ fn alter_sauce(
 
     let mut output = content.to_vec();
     sauce.write(&mut output)?;
-    fs::write(file, output)?;
+    write_atomic(file, |writer| writer.write_all(&output))?;
 
     println!("SAUCE metadata updated in '{}'", file.display());
     Ok(())
@@ -856,7 +798,7 @@ fn remove_sauce(
     };
 
     let stripped = strip_sauce(&data, mode);
-    fs::write(file, stripped)?;
+    write_atomic(file, |writer| writer.write_all(stripped))?;
 
     let records = if all {
         "All SAUCE records"
@@ -970,4 +912,23 @@ More info: https://www.acid.org/info/sauce/sauce.htm
 "#
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn failed_atomic_write_preserves_original_and_cleans_up() {
+        let directory = tempfile::tempdir().unwrap();
+        let file = directory.path().join("art.ans");
+        fs::write(&file, b"original").unwrap();
+        let result = write_atomic(&file, |writer| {
+            writer.write_all(b"partial replacement")?;
+            Err(io::Error::other("simulated write failure"))
+        });
+        assert!(result.is_err());
+        assert_eq!(fs::read(&file).unwrap(), b"original");
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
+    }
 }

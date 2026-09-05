@@ -39,6 +39,24 @@ fn test_comments_without_valid_id() {
     let parsed = SauceRecord::from_bytes(&data).unwrap().unwrap();
     assert_eq!(parsed.title(), &BString::from("Test"));
     assert_eq!(parsed.comments().len(), 0); // Comments ignored due to bad ID
+    assert_eq!(parsed.header().comments, 0);
+    assert_eq!(parsed.record_len(), 128);
+
+    let encoded = parsed.to_bytes().unwrap();
+    assert_eq!(encoded.len(), 129);
+    let reparsed = SauceRecord::from_bytes(&encoded).unwrap().unwrap();
+    assert!(parsed == reparsed);
+
+    // Adding comments after a lenient parse must also produce a valid block.
+    let modified = parsed
+        .to_builder()
+        .add_comment("Replacement".into())
+        .unwrap()
+        .build();
+    let reparsed = SauceRecord::from_bytes(&modified.to_bytes().unwrap())
+        .unwrap()
+        .unwrap();
+    assert!(modified == reparsed);
 }
 
 #[test]

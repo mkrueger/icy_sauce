@@ -122,6 +122,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+### Serialization errors
+
+`SauceRecord::to_bytes()` and `to_bytes_without_eof()` now return `Result<Vec<u8>>`.
+Callers migrating from the previous infallible methods must handle the result,
+for example with `let bytes = sauce.to_bytes()?;`.
+
+All date writers reject years outside 0–9999 and month/day values above 99 with
+`SauceError::UnsupportedSauceDate`, before writing any part of the date or record.
+Calendar validation remains optional: unknown dates (`00000000`) and other
+eight-digit dates are still supported. The `chrono` feature can validate calendar dates.
+
 ### Stripping SAUCE Metadata
 
 You can remove one or more SAUCE records (and optionally their preceding EOF 0x1A marker) from the end of a file buffer without copying the data using `strip_sauce`.
@@ -132,8 +143,8 @@ You can remove one or more SAUCE records (and optionally their preceding EOF 0x1
 |------|---------|--------------|----------|
 | `Last` | Last SAUCE record | Preserves all EOF bytes | Keep legacy EOF marker but drop metadata |
 | `LastStripFinalEof` (default) | Last SAUCE record | Removes a single EOF directly before the record | Clean view of payload |
-| `All` | All contiguous SAUCE records (separated by ≤1 EOF each) | Preserves trailing EOF bytes | Multi-edit cleanup while keeping final EOF |
-| `AllStripFinalEof` | All contiguous SAUCE records | Also strips a single trailing EOF after last removed record | Aggressive full cleanup |
+| `All` | All contiguous SAUCE records (separated by ≤1 EOF each) | Removes one preceding EOF per record; preserves additional EOF bytes | Multi-edit cleanup |
+| `AllStripFinalEof` | All contiguous SAUCE records | Like `All`, then removes one additional EOF from the remaining data | Aggressive full cleanup |
 
 Contiguous multi-record stripping stops if more than one consecutive EOF (0x1A 0x1A ...) separates records—stacked EOFs form a barrier.
 
@@ -146,7 +157,7 @@ let cleaned = strip_sauce(&data, StripMode::default()); // LastStripFinalEof
 // Keep EOF marker but remove SAUCE
 let keep_eof = strip_sauce(&data, StripMode::Last);
 
-// Remove multiple contiguous SAUCE records, keep trailing EOF(s)
+// Remove multiple contiguous SAUCE records and their associated EOFs
 let multi = strip_sauce(&data, StripMode::All);
 
 // Most aggressive: remove all contiguous SAUCE records and one trailing EOF
@@ -156,10 +167,12 @@ let aggressive = strip_sauce(&data, StripMode::AllStripFinalEof);
 Multi-record example:
 
 ```text
-"Content" 0x1A SAUCE1 0x1A SAUCE2 0x1A  -> StripMode::All ->  "Content" 0x1A
+"Content" 0x1A SAUCE1 0x1A SAUCE2       -> StripMode::All ->  "Content"
 
-"Content" 0x1A SAUCE1 0x1A 0x1A SAUCE2 -> StripMode::All ->  "Content" 0x1A 0x1A SAUCE2  (double EOF blocks chain)
+"Content" 0x1A SAUCE1 0x1A 0x1A SAUCE2 -> StripMode::All ->  "Content" 0x1A SAUCE1 0x1A  (extra EOF blocks chain)
 ```
+
+Headers must be at the exact end of the input. An EOF after the final header prevents stripping in every mode.
 
 #### Getting Strip Statistics
 
@@ -177,23 +190,38 @@ If no SAUCE record is found, the original slice is returned unchanged.
 
 ## Command Line Tool
 
-This library includes a command-line utility for inspecting SAUCE records in files. You can use it directly with `cargo run --example`:
+The workspace includes the `sauce` command-line utility for viewing, adding,
+altering, and removing SAUCE metadata.
 
 ### CLI Installation
 
 ```bash
-cargo run --example print_sauce <FILE>
-cargo install --path . --example print_sauce
+cargo install --path crates/icy_sauce_cli
 ```
 
 ### Usage
 
 ```bash
-cargo run --example print_sauce artwork.ans
-cargo run --example print_sauce artwork.ans --comments
-cargo run --example print_sauce artwork.ans --raw
-cargo run --example print_sauce artwork.ans -c -r
+sauce view artwork.ans --comments
+sauce view artwork.ans --json
+sauce add artwork.ans --title "My artwork"
+sauce alter artwork.ans --group "My group"
+sauce remove artwork.ans --strip-eof
 ```
+
+- `alter` preserves untouched metadata bytes, raw fields, and the original `file_size`.
+- `add` calculates `file_size` from the payload, using 0 if it cannot fit in `u32`.
+    An explicit JSON `file_size` overrides this value for both `add` and `alter`.
+- CLI options override JSON fields. CLI `--comment` values replace JSON comments.
+    On `alter`, omitted JSON comments preserve existing comments, while `"comments": []`
+    clears them. `--clear-comments` takes precedence; `--add-comment` appends afterward.
+- Changes use same-directory temporary files and atomic replacement, preserving
+    permission bits and following symlinks. Atomic replacement creates a new inode;
+    other hard links keep their old contents, and ownership, ACLs, and extended
+    attributes are not copied.
+- CLI text input is UTF-8. JSON export uses lossy UTF-8 for legacy byte strings,
+    so JSON is not a lossless backup format for CP437 metadata. The library itself
+    preserves these bytes, as does `alter` for fields not explicitly replaced.
 
 ### Example Output
 

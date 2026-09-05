@@ -62,7 +62,6 @@ const COMMENT_ID: [u8; COMMENT_ID_LEN] = *b"COMNT";
 /// This is the main structure for SAUCE.
 ///
 /// SAUCE metadata consits of a header and optional comments.
-#[derive(PartialEq)]
 pub struct SauceRecord {
     pub(crate) header: SauceHeader,
 
@@ -70,6 +69,12 @@ pub struct SauceRecord {
     pub(crate) comments: Vec<BString>,
 
     pub(crate) cached_caps: OnceCell<Option<Capabilities>>,
+}
+
+impl PartialEq for SauceRecord {
+    fn eq(&self, other: &Self) -> bool {
+        self.header == other.header && self.comments == other.comments
+    }
 }
 
 // Custom Clone impl that resets cache
@@ -106,7 +111,7 @@ impl SauceRecord {
     /// for copying comment lines and the header's owned strings.
     #[must_use]
     pub fn from_bytes(data: &[u8]) -> crate::Result<Option<Self>> {
-        let Some(header) = SauceHeader::from_bytes(data)? else {
+        let Some(mut header) = SauceHeader::from_bytes(data)? else {
             return Ok(None);
         };
 
@@ -144,6 +149,11 @@ impl SauceRecord {
                 log::warn!("Missing EOF marker before SAUCE record");
             }
         }
+
+        // Keep the parsed record internally consistent when an invalid COMNT
+        // marker caused the advertised comments to be ignored. Use the original
+        // count above to locate the EOF marker in the input.
+        header.comments = comments.len() as u8;
 
         Ok(Some(SauceRecord {
             header,
@@ -190,10 +200,12 @@ impl SauceRecord {
     /// Useful for appending to existing file content or for tests that need a full
     /// byte representation. Use [`to_bytes_without_eof`](Self::to_bytes_without_eof)
     /// if you need only the SAUCE payload without the leading EOF marker.
-    pub fn to_bytes(&self) -> Vec<u8> {
+    ///
+    /// Returns an error if the date cannot fit the eight-byte wire format.
+    pub fn to_bytes(&self) -> crate::Result<Vec<u8>> {
         let mut buf = Vec::with_capacity(self.record_len() + 1); // +1 for EOF
-        let _ = self.write(&mut buf);
-        buf
+        self.write(&mut buf)?;
+        Ok(buf)
     }
 
     /// Serialize this SAUCE record without the EOF marker.
@@ -201,10 +213,12 @@ impl SauceRecord {
     /// The SAUCE specification places a single 0x1A byte before the comment block / header.    
     /// Certain embedding contexts already manage this EOF marker externally; for those scenarios
     /// this variant avoids duplication.
-    pub fn to_bytes_without_eof(&self) -> Vec<u8> {
+    ///
+    /// Returns an error if the date cannot fit the eight-byte wire format.
+    pub fn to_bytes_without_eof(&self) -> crate::Result<Vec<u8>> {
         let mut buf = Vec::with_capacity(self.record_len());
-        let _ = self.write_without_eof(&mut buf);
-        buf
+        self.write_without_eof(&mut buf)?;
+        Ok(buf)
     }
 
     /// Write SAUCE with EOF marker (standard format).
@@ -224,6 +238,9 @@ impl SauceRecord {
     /// (128 bytes) is written. In case of any I/O error an appropriate [`SauceError::IoError`]
     /// is returned.
     fn write_internal<W: Write>(&self, writer: &mut W, eof: bool) -> crate::Result<()> {
+        // Reject invalid dates before writing an EOF or any comments.
+        self.header.date.validate_wire_format()?;
+
         // EOF Char.
         if eof {
             if let Err(err) = writer.write_all(&[0x1A]) {
@@ -398,10 +415,6 @@ impl SauceRecord {
     ///
     /// The date is stored as CCYYMMDD in the SAUCE header.
     ///
-    /// # Errors
-    ///
-    /// Returns [`SauceError::UnsupportedSauceDate`] if the date cannot be parsed or is invalid.
-    ///
     /// # Example
     ///
     /// ```
@@ -504,10 +517,6 @@ impl SauceRecord {
     /// Convert this SAUCE record to a builder for modification.
     ///
     /// This allows you to create a modified copy of an existing SAUCE record.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the capabilities cannot be converted to builder format.
     ///
     /// # Example
     ///

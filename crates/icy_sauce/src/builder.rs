@@ -72,7 +72,7 @@ pub struct SauceRecordBuilder {
     pub(crate) header: SauceHeader,
 
     /// Comment lines; up to 255 comments, each 64 bytes max (space-padded).
-    /// These are validated as added via [`comment`](Self::comment).
+    /// These are validated as added via [`add_comment`](Self::add_comment).
     pub(crate) comments: Vec<BString>,
 }
 
@@ -252,7 +252,7 @@ impl SauceRecordBuilder {
     ///
     /// # Arguments
     ///
-    /// * `date` - The creation date as a [`chrono::NaiveDate`]
+    /// * `date` - The creation date as a [`SauceDate`]
     ///
     /// The date is automatically formatted to YYYYMMDD as required by the SAUCE specification.
     ///
@@ -419,6 +419,13 @@ impl SauceRecordBuilder {
         self.comments.push(comment);
         self.header.comments = self.comments.len() as u8;
         Ok(self)
+    }
+
+    /// Remove all comment lines while preserving the remaining metadata.
+    pub fn clear_comments(mut self) -> Self {
+        self.comments.clear();
+        self.header.comments = 0;
+        self
     }
 
     /// Finalize the builder and return a [`crate::SauceRecord`] record.

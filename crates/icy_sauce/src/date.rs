@@ -20,8 +20,9 @@
 //!
 //! # Validation
 //!
-//! - `from_bytes` only checks byte length (== 8) and performs positional
-//!   arithmetic; it does not enforce digit range or calendar validity.
+//! - `from_bytes` checks byte length (== 8) and ASCII digits, but not calendar validity.
+//! - `write` rejects values that cannot fit the eight-byte wire format:
+//!   years outside 0–9999 or month/day values above 99.
 //! - Use `TryFrom<SauceDate> for chrono::NaiveDate` (with `chrono` feature)
 //!   to validate ranges.
 //!
@@ -148,6 +149,10 @@ impl SauceDate {
 
     /// Write the strict SAUCE wire format (`YYYYMMDD`) to a writer.
     ///
+    /// Returns [`crate::SauceError::UnsupportedSauceDate`] without writing anything
+    /// if the year is outside 0–9999 or month/day exceed 99. Calendar validity
+    /// is intentionally not enforced, so unknown dates such as `00000000` remain valid.
+    ///
     /// ```
     /// use icy_sauce::SauceDate;
     /// let mut buf = Vec::new();
@@ -155,8 +160,18 @@ impl SauceDate {
     /// assert_eq!(&buf, b"20251108");
     /// ```
     pub fn write<A: std::io::Write>(&self, writer: &mut A) -> crate::Result<()> {
+        self.validate_wire_format()?;
         write!(writer, "{:04}{:02}{:02}", self.year, self.month, self.day)
             .map_err(|e| crate::SauceError::io_error("<date>", e))?;
+        Ok(())
+    }
+
+    pub(crate) fn validate_wire_format(&self) -> crate::Result<()> {
+        if !(0..=9999).contains(&self.year) || self.month > 99 || self.day > 99 {
+            return Err(crate::SauceError::UnsupportedSauceDate(
+                self.to_string().into(),
+            ));
+        }
         Ok(())
     }
 
