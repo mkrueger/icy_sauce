@@ -6,7 +6,7 @@ This workspace contains the `icy_sauce` library and the `icy_sauce_cli` package,
 which provides the `sauce` executable. These tools handle metadata, not the decoding
 or rendering of artwork, images, or audio.
 
-**Upcoming release:** library and CLI **0.4.0** (not yet published).
+**Current release:** library and CLI **0.4.0**.
 Both packages use the same release version, even when only one has major changes.
 See [CHANGELOG.md](CHANGELOG.md) for release notes and
 [Migrating to 0.4](#migrating-to-04) for library API changes.
@@ -49,8 +49,8 @@ icy_sauce = "0.4.0"
 bstr = "1.12" # Used explicitly in the examples below
 ```
 
-The version above is the upcoming release. Until it is published, use a checkout
-of this repository and a path dependency on `crates/icy_sauce`.
+For local development, use a checkout of this repository and a path dependency
+on `crates/icy_sauce`.
 
 ### Optional Features
 
@@ -265,7 +265,7 @@ From the repository root (also works before publication):
 cargo install --path crates/icy_sauce_cli
 ```
 
-After CLI 0.4.0 is published, it can be installed with
+CLI 0.4.0 can also be installed from crates.io with
 `cargo install icy_sauce_cli --version 0.4.0`. The executable is named `sauce`,
 not `icy_sauce_cli`.
 
@@ -574,8 +574,8 @@ are recommended before release; smoke runs are not exhaustive.
 For release verification, `cargo package --workspace` builds both packages using
 the local library version. Publish the library before publishing the dependent CLI.
 Keep the library dependency in the CLI manifest aligned with the library release;
-both packages share the same release version. Replace the unreleased labels in this
-README and [CHANGELOG.md](CHANGELOG.md) when publishing.
+both packages share the same release version. Update this README and date the
+release entry in [CHANGELOG.md](CHANGELOG.md) when publishing.
 
 ## Related Projects
 

@@ -2,7 +2,7 @@
 
 Notable changes to icy_sauce are documented here.
 
-## 0.4.0 — Unreleased
+## 0.4.0 — 2026-09-06
 
 Release versions: library `icy_sauce` **0.4.0**, CLI `icy_sauce_cli` **0.4.0**
 (executable: `sauce`). Both packages use the same release version. The CLI advances
