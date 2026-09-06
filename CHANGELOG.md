@@ -4,6 +4,11 @@ Notable changes to icy_sauce are documented here.
 
 ## 0.4.0 — Unreleased
 
+Release versions: library `icy_sauce` **0.4.0**, CLI `icy_sauce_cli` **0.4.0**
+(executable: `sauce`). Both packages use the same release version. The CLI advances
+from 0.1.0 to align with the library, including the JSON, editing, and
+failure-reporting changes described below.
+
 ### Breaking changes
 
 - `SauceRecord::to_bytes()` and `to_bytes_without_eof()` now return

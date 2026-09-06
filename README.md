@@ -2,6 +2,15 @@
 
 A Rust library for reading and writing SAUCE (Standard Architecture for Universal Comment Extensions) metadata records. SAUCE is a metadata protocol widely used in the ANSI art and BBS scenes to embed information about artwork files.
 
+This workspace contains the `icy_sauce` library and the `icy_sauce_cli` package,
+which provides the `sauce` executable. These tools handle metadata, not the decoding
+or rendering of artwork, images, or audio.
+
+**Upcoming release:** library and CLI **0.4.0** (not yet published).
+Both packages use the same release version, even when only one has major changes.
+See [CHANGELOG.md](CHANGELOG.md) for release notes and
+[Migrating to 0.4](#migrating-to-04) for library API changes.
+
 ## What is SAUCE?
 
 SAUCE is a metadata format created in 1994 by ACiD Productions to standardize how information about digital artwork and other files is stored. The SAUCE record is appended to the end of files and contains:
@@ -14,7 +23,7 @@ SAUCE is a metadata format created in 1994 by ACiD Productions to standardize ho
 
 ## Features
 
-- **Full SAUCE Specification Support**: Implements the complete SAUCE v00 specification
+- **SAUCE v00 Metadata Support**: Reads and writes headers and comments using the revision 5 field definitions
 - **Multiple Format Support**:
   - Character formats (ANSI, ASCII, PCBoard, Avatar, RipScript, etc.)
   - Binary text formats (BinaryText, XBin)
@@ -37,25 +46,40 @@ Add this to your `Cargo.toml`:
 ```toml
 [dependencies]
 icy_sauce = "0.4.0"
+bstr = "1.12" # Used explicitly in the examples below
 ```
+
+The version above is the upcoming release. Until it is published, use a checkout
+of this repository and a path dependency on `crates/icy_sauce`.
+
+### Optional Features
+
+No optional features are enabled by default.
+
+| Feature | Adds |
+|---------|------|
+| `chrono` | Conversions between `SauceDate` and `chrono::NaiveDate`, including calendar validation |
+| `serde` | `Serialize` and `Deserialize` for `MetaData` (title, author, group, comments), not the full `SauceRecord` |
+
+Enable features with `icy_sauce = { version = "0.4.0", features = ["chrono", "serde"] }`.
+The CLI's JSON format is independent of the library's optional `serde` feature.
 
 ## Basic Usage
 
 ### Reading SAUCE
 
-```rust
+```rust,no_run
 use icy_sauce::prelude::*; // brings common types into scope
 use bstr::ByteSlice;
-use std::fs;
+use std::path::Path;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let data = fs::read("artwork.ans")?;
-    
-    if let Some(sauce) = SauceRecord::from_bytes(&data)? {
+fn main() -> icy_sauce::Result<()> {
+    // Reads a bounded trailing window rather than loading the entire file.
+    if let Some(sauce) = SauceRecord::from_path(Path::new("artwork.ans"))? {
         println!("Title: {}", sauce.title());
         println!("Author: {}", sauce.author());
         println!("Group: {}", sauce.group());
-        
+
         // Get format-specific information
         if let Some(caps) = sauce.capabilities() {
             match caps {
@@ -91,10 +115,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     }
-    
+
     Ok(())
 }
 ```
+
+For an existing in-memory file buffer, use `SauceRecord::from_bytes(&data)`.
+Both readers return `Ok(None)` when no trailing SAUCE record is found and `Err`
+for unsupported versions or structural errors. Unknown data/file type values can
+be retained in the raw header even when no typed capabilities are available.
 
 ### Writing SAUCE
 
@@ -102,7 +131,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 use icy_sauce::prelude::*;
 use bstr::BString;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> icy_sauce::Result<()> {
+    let content = b"Your file content here...";
     // Create character capabilities for an 80x25 ANSI file
     let mut caps = CharacterCapabilities::new(CharacterFormat::Ansi)
         .dimensions(80, 25);
@@ -113,18 +143,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .author(BString::from("Artist"))?
         .group(BString::from("Art Group"))?
         .date(SauceDate::new(2024, 1, 15))
+        .file_size(content.len() as u32)
         .capabilities(Capabilities::Character(caps))?
         .add_comment(BString::from("Created with love"))?
         .build();
 
-    // Write to file with content
-    let mut output = Vec::new();
-    output.extend_from_slice(b"Your file content here...");
+    // Build the complete file in memory: payload + EOF + SAUCE.
+    let mut output = content.to_vec();
     sauce.write(&mut output)?;
-    
+    assert!(output.starts_with(content));
+
     Ok(())
 }
 ```
+
+The library does not calculate `file_size` or replace existing metadata for you.
+Set the payload size explicitly (0 for unknown or larger than `u32::MAX`), and
+strip an existing record before appending a replacement. `write()` includes one
+leading EOF byte; `write_without_eof()` omits it. The CLI performs file replacement
+and payload-size handling for you.
 
 ### Migrating to 0.4
 
@@ -168,10 +205,12 @@ You can remove one or more SAUCE records (and optionally their preceding EOF 0x1
 Contiguous multi-record stripping stops if more than one consecutive EOF (0x1A 0x1A ...) separates records—stacked EOFs form a barrier.
 
 ```rust
-use icy_sauce::{strip_sauce, StripMode};
+use icy_sauce::{strip_sauce, SauceRecordBuilder, StripMode};
 
-// Assume `data` contains file payload + EOF + SAUCE
+let mut data = b"Content".to_vec();
+data.extend(SauceRecordBuilder::default().build().to_bytes().unwrap());
 let cleaned = strip_sauce(&data, StripMode::default()); // LastStripFinalEof
+assert_eq!(cleaned, b"Content");
 
 // Keep EOF marker but remove SAUCE
 let keep_eof = strip_sauce(&data, StripMode::Last);
@@ -202,10 +241,12 @@ destructive operations do not guess which preceding bytes belong to metadata.
 Use `strip_sauce_ex` for metadata about the operation:
 
 ```rust
-use icy_sauce::{strip_sauce_ex, StripMode};
+use icy_sauce::{strip_sauce_ex, SauceRecordBuilder, StripMode};
 
+let mut data = b"Content".to_vec();
+data.extend(SauceRecordBuilder::default().build().to_bytes().unwrap());
 let result = strip_sauce_ex(&data, StripMode::AllStripFinalEof);
-println!("Removed {} record(s), {} EOF byte(s); new length {}", 
+println!("Removed {} record(s), {} EOF byte(s); new length {}",
          result.records_removed, result.eof_bytes_removed, result.data.len());
 ```
 
@@ -218,9 +259,15 @@ altering, and removing SAUCE metadata.
 
 ### CLI Installation
 
+From the repository root (also works before publication):
+
 ```bash
 cargo install --path crates/icy_sauce_cli
 ```
+
+After CLI 0.4.0 is published, it can be installed with
+`cargo install icy_sauce_cli --version 0.4.0`. The executable is named `sauce`,
+not `icy_sauce_cli`.
 
 ### Usage
 
@@ -231,6 +278,36 @@ sauce add artwork.ans --title "My artwork"
 sauce alter artwork.ans --group "My group"
 sauce remove artwork.ans --strip-eof
 ```
+
+Use `sauce <command> --help` for the full option list and `sauce info` for SAUCE
+field definitions. `add` refuses an existing record unless `--force` is supplied;
+`alter` requires one. Raw format fields use `--data-type`, `--file-type`,
+`--tinfo1` through `--tinfo4`, `--tflags`, and `--tinfos`.
+
+### JSON and Comment Editing
+
+```bash
+# Export metadata, then apply it to an existing record.
+sauce view artwork.ans --json > metadata.json
+sauce alter artwork.ans --from-json metadata.json --group "New group"
+
+# Read a partial update from stdin; other fields remain unchanged.
+printf '%s\n' '{"title":"New title","comments":[]}' | sauce alter artwork.ans --from-json -
+
+# Append comments or clear the comment block.
+sauce alter artwork.ans --add-comment "Additional note"
+sauce alter artwork.ans --clear-comments
+```
+
+JSON uses the keys `title`, `author`, `group`, `date`, `comments`, `file_size`,
+`data_type`, `file_type`, `tinfo1`, `tinfo2`, `tinfo3`, `tinfo4`, `tflags`, and
+`tinfos`. Dates accept `YYYYMMDD` or `YYYY-MM-DD`; `0000-00-00` clears the date.
+Omitted or `null` fields leave existing values unchanged on `alter`; use an empty
+string or empty comment array to clear the corresponding text fields.
+`view --json` emits `null` if no record exists; that output is not an importable
+metadata object. JSON is not a byte-exact backup for legacy encodings.
+
+### Editing and Safety Semantics
 
 - `alter` preserves untouched metadata bytes, raw fields, and the original `file_size`.
 - `add` calculates `file_size` from the payload, using 0 if it cannot fit in `u32`.
@@ -266,30 +343,24 @@ sauce remove artwork.ans --strip-eof
     If a SAUCE header remains at the resulting tail, the CLI reports partial removal
     and exits with status 1; the already removed records are not restored.
 
-### Example Output
+### Removal Modes and Exit Status
 
-```text
-SAUCE Information for 'demo.ans'
-============================================================
-Title:    Winter Scene
-Author:   ArtistName
-Group:    Cool Group
-Date:     2024-01-15
-Type:     Character
+| Command options | Library mode | Effect |
+|-----------------|--------------|--------|
+| `remove` | `Last` | Remove the last record, keep its EOF byte |
+| `remove --strip-eof` | `LastStripFinalEof` | Also remove one preceding EOF |
+| `remove --all` | `All` | Remove contiguous records and one associated EOF per record |
+| `remove --all --strip-eof` | `AllStripFinalEof` | Also remove one extra EOF from the remaining payload |
 
-Character File Information:
-  Format:        Ansi
-  Dimensions:    80x25
-  iCE Colors:    Yes
-  Letter Spacing: NinePixel
-  Aspect Ratio:   Legacy
-  Font:          IBM VGA
+| Exit code | Meaning |
+|-----------|---------|
+| 0 | Success; includes `view`/`remove` finding no metadata |
+| 1 | Parsing, validation, I/O, partial-removal, or durability error |
+| 2 | Invalid command-line syntax or arguments |
 
-Comments (2):
-----------------------------------------
-  1: Created for the winter artpack
-  2: Inspired by snowy mountains
-```
+An exit code of 1 does **not** always mean the file is unchanged: partial removal
+and a failed directory sync happen after replacement. Read the error message
+before retrying a modifying command.
 
 ## Supported Data Types
 
@@ -327,9 +398,9 @@ use icy_sauce::prelude::*;
 use bstr::BString;
 
 let sauce = SauceRecordBuilder::default()
-    .title(BString::from("Art"))?
-    .add_comment(BString::from("First comment"))?
-    .add_comment(BString::from("Second comment"))?
+    .title(BString::from("Art")).unwrap()
+    .add_comment(BString::from("First comment")).unwrap()
+    .add_comment(BString::from("Second comment")).unwrap()
     .build();
 
 for comment in sauce.comments() {
@@ -345,21 +416,28 @@ use bstr::BString;
 use icy_sauce::{LetterSpacing, AspectRatio};
 
 // BinaryText (width must be even; height can be derived from file size)
-let mut bin_caps = BinaryCapabilities::binary_text(160)?; // 160 columns
+let mut bin_caps = BinaryCapabilities::binary_text(160).unwrap(); // 160 columns
 bin_caps.ice_colors = true;
 bin_caps.letter_spacing = LetterSpacing::NinePixel;
 bin_caps.aspect_ratio = AspectRatio::Legacy;
-bin_caps.set_font(BString::from("IBM VGA"))?;
+bin_caps.set_font(BString::from("IBM VGA")).unwrap();
 
 // XBin with explicit dimensions
-let xbin_caps = BinaryCapabilities::xbin(80, 50)?;
+let xbin_caps = BinaryCapabilities::xbin(80, 50).unwrap();
 ```
 
-To compute height of a BinaryText file after parsing:
+To compute height of a BinaryText record:
 
 ```rust
-if let Some(h) = bin_caps.binary_text_height_from_file_size(record.file_size()) {
-    println!("Derived height: {}", h);
+use icy_sauce::{BinaryCapabilities, Capabilities, SauceRecordBuilder};
+
+let record = SauceRecordBuilder::default()
+    .file_size(80 * 2 * 25)
+    .capabilities(Capabilities::Binary(BinaryCapabilities::binary_text(80).unwrap()))
+    .unwrap()
+    .build();
+if let Some(Capabilities::Binary(caps)) = record.capabilities() {
+    assert_eq!(caps.binary_text_height_from_file_size(record.file_size()), Some(25));
 }
 ```
 
@@ -372,6 +450,8 @@ let mut caps = BitmapCapabilities::new(BitmapFormat::Png);
 caps.width = 640;
 caps.height = 480;
 caps.pixel_depth = 24;
+
+let vector = VectorCapabilities::new(VectorFormat::Dxf);
 ```
 
 ### Audio Files
@@ -400,11 +480,18 @@ let title = BString::from(b"My \x01 ASCII Art");
 println!("Title: {}", title.to_str_lossy());
 ```
 
+`to_str_lossy()` is UTF-8 display conversion, **not** CP437 decoding. Use an
+explicit codepage converter if you need faithful Unicode text. Field limits count
+bytes, not characters: title 35, author/group 20, each comment 64 (up to 255 lines),
+validated font name 21, and raw TInfoS 22. Library display examples do not escape
+terminal controls; use the CLI's escaped output for untrusted metadata.
+
 ## Error Handling
 
 ```rust
-use icy_sauce::SauceError;
+use icy_sauce::{SauceError, SauceRecordBuilder};
 
+let sauce_result = SauceRecordBuilder::default().title("x".repeat(36).into());
 match sauce_result {
     Err(SauceError::TitleTooLong(len)) => println!("Title is {} bytes, max is 35", len),
     Err(SauceError::CommentLimitExceeded) => println!("Cannot add more than 255 comments"),
@@ -458,12 +545,18 @@ Issues and PRs welcome: <https://github.com/mkrueger/icy_sauce>.
 Run from the workspace root:
 
 ```bash
+cargo test --workspace
 cargo test --workspace --all-features
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps
 cargo fmt --all -- --check
 cargo fmt --manifest-path fuzz/Cargo.toml --all -- --check
+cargo clippy --manifest-path fuzz/Cargo.toml --all-targets -- -D warnings
 ```
+
+CI currently runs on Linux with Rust 1.89.0 and stable. It tests default and
+all-feature configurations and checks formatting, Clippy, and Rustdoc. Local
+success does not replace checking the workflow results before a release.
 
 The fuzz package is a separate workspace. With `cargo-fuzz` and a nightly
 toolchain installed, bounded smoke runs can be started from the repository root:
@@ -480,6 +573,9 @@ are recommended before release; smoke runs are not exhaustive.
 
 For release verification, `cargo package --workspace` builds both packages using
 the local library version. Publish the library before publishing the dependent CLI.
+Keep the library dependency in the CLI manifest aligned with the library release;
+both packages share the same release version. Replace the unreleased labels in this
+README and [CHANGELOG.md](CHANGELOG.md) when publishing.
 
 ## Related Projects
 
