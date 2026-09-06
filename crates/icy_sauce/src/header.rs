@@ -6,17 +6,17 @@
 //!
 //! # SAUCE Header Layout
 //!
-//! The SAUCE header is exactly 128 bytes and is appended to the end of the file, followed
-//! by an optional comment block (if present):
+//! The SAUCE header is exactly 128 bytes and is appended to the end of the file,
+//! preceded by an optional comment block (if present):
 //!
 //! | Offset | Length | Field      | Type     | Description                    |
 //! |--------|--------|------------|----------|--------------------------------|
-//! | 0      | 5      | ID         | char[5]  | "SAUCE" magic bytes            |
-//! | 5      | 2      | Version    | char[2]  | "00" for SAUCE v00             |
-//! | 7      | 35     | Title      | char[35] | Artwork title (space-padded)   |
-//! | 42     | 20     | Author     | char[20] | Creator name (space-padded)    |
-//! | 62     | 20     | Group      | char[20] | Group/org (space-padded)       |
-//! | 82     | 8      | Date       | char[8]  | CCYYMMDD format                |
+//! | 0      | 5      | ID         | `char[5]`  | "SAUCE" magic bytes            |
+//! | 5      | 2      | Version    | `char[2]`  | "00" for SAUCE v00             |
+//! | 7      | 35     | Title      | `char[35]` | Artwork title (space-padded)   |
+//! | 42     | 20     | Author     | `char[20]` | Creator name (space-padded)    |
+//! | 62     | 20     | Group      | `char[20]` | Group/org (space-padded)       |
+//! | 82     | 8      | Date       | `char[8]`  | CCYYMMDD format                |
 //! | 90     | 4      | FileSize   | u32 LE   | Original file size in bytes    |
 //! | 94     | 1      | DataType   | u8       | File category (0-8)            |
 //! | 95     | 1      | FileType   | u8       | Format-specific type           |
@@ -26,7 +26,7 @@
 //! | 102    | 2      | TInfo4     | u16 LE   | Type-dependent field 4         |
 //! | 104    | 1      | Comments   | u8       | Number of comment lines (0=none)|
 //! | 105    | 1      | TFlags     | u8       | Type-dependent flags           |
-//! | 106    | 22     | TInfoS     | char[22] | Type-dependent string (zero-pad)|
+//! | 106    | 22     | TInfoS     | `char[22]` | Type-dependent string (NUL-terminated)|
 //!
 //! **Total: 128 bytes**
 //!
@@ -79,7 +79,7 @@ pub(crate) const TINFO_LEN: usize = 22;
 ///
 /// # Serialization
 ///
-/// Use [`read`](Self::read) to deserialize from file data, and [`write`](Self::write)
+/// Use [`from_bytes`](Self::from_bytes) to deserialize from file data, and [`write`](Self::write)
 /// to serialize back to bytes. Both methods handle padding/trimming automatically.
 ///
 /// # Note on Comments
@@ -123,7 +123,10 @@ pub struct SauceHeader {
     /// Type-dependent flags byte
     pub t_flags: u8,
 
-    /// Type-dependent string information field (zero-padded, up to 22 bytes)
+    /// Raw type-dependent string field, up to 22 bytes (trailing zero padding removed).
+    /// Embedded NULs and unterminated legacy values are preserved for lossless edits.
+    /// Capability font decoders stop at the first NUL; validated font writers accept
+    /// at most 21 bytes to leave room for the terminator.
     pub t_info_s: BString,
 }
 
@@ -131,7 +134,7 @@ impl SauceHeader {
     /// Deserialize a SAUCE header from the end of file data.
     ///
     /// Searches for a valid SAUCE header in the last 128 bytes of the provided data.
-    /// If found and valid, returns the parsed header. The header can be followed by a
+    /// If found and valid, returns the parsed header. The header can be preceded by a
     /// comment block (indicated by `header.comments > 0`).
     ///
     /// # Arguments
@@ -168,7 +171,6 @@ impl SauceHeader {
     /// }
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
-    #[must_use]
     pub fn from_bytes(data: &[u8]) -> crate::Result<Option<Self>> {
         if data.len() < HDR_LEN {
             return Ok(None);
@@ -290,8 +292,9 @@ impl SauceHeader {
     /// - **title**: Padded/trimmed to exactly 35 bytes with spaces
     /// - **author**: Padded/trimmed to exactly 20 bytes with spaces
     /// - **group**: Padded/trimmed to exactly 20 bytes with spaces
-    /// - **date**: Padded/trimmed to exactly 8 bytes (typically CCYYMMDD)
-    /// - **t_info_s**: Padded/trimmed to exactly 22 bytes with null bytes
+    /// - **date**: Validated as eight representable ASCII digits (CCYYMMDD)
+    /// - **t_info_s**: Raw bytes padded/trimmed to 22 bytes; no string normalization.
+    ///   Use capability font setters to enforce NUL-terminated string semantics.
     ///
     /// # Example
     ///

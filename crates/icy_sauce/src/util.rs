@@ -34,3 +34,19 @@ pub(crate) fn zero_trim(data: &[u8]) -> BString {
     }
     BString::new(data[..end].to_vec())
 }
+
+/// Decode a font string without altering the underlying raw TInfoS field.
+pub(crate) fn decode_font(data: &[u8]) -> Option<BString> {
+    let end = data.iter().position(|&b| b == 0).unwrap_or(data.len());
+    (end > 0).then(|| BString::from(&data[..end]))
+}
+
+pub(crate) fn validate_font(font: &[u8]) -> crate::Result<()> {
+    if font.len() > crate::limits::MAX_FONT_NAME_LENGTH {
+        return Err(crate::SauceError::FontNameTooLong(font.len()));
+    }
+    if font.contains(&0) {
+        return Err(crate::SauceError::InvalidFontName);
+    }
+    Ok(())
+}

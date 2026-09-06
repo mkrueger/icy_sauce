@@ -11,10 +11,11 @@
 //!
 //! - [`archive`] - Compressed archive formats (ZIP, RAR, etc.)
 //! - [`audio`] - Sound and music formats (MOD, S3M, WAV, etc.)
-//! - [`bin`] - Binary text formats (BinaryText, XBin)
-//! - [`char`] - Character/text formats (ANSI, ASCII, etc.)
+//! - [`binary`] - Binary text formats (BinaryText, XBin)
+//! - [`character`] - Character/text formats (ANSI, ASCII, etc.)
 //! - [`executable`] - Executable file formats
-//! - [`pixel`] - Graphics formats (bitmap and vector)
+//! - [`bitmap`] - Bitmap images, animations, and RIPScript
+//! - [`vector`] - Vector graphics formats
 //!
 //! # Unified Access
 //!
@@ -70,7 +71,8 @@ pub use crate::vector::{VectorCapabilities, VectorFormat};
 ///
 /// - [`Character`](Capabilities::Character) - Text and ANSI art files
 /// - [`Binary`](Capabilities::Binary) - Binary text and XBin files
-/// - [`Graphics`](Capabilities::Graphics) - Bitmap and vector graphics
+/// - [`Bitmap`](Capabilities::Bitmap) - Bitmap images, animations, and RIPScript
+/// - [`Vector`](Capabilities::Vector) - Vector graphics
 /// - [`Audio`](Capabilities::Audio) - Sound and music files
 /// - [`Archive`](Capabilities::Archive) - Compressed archives
 /// - [`Executable`](Capabilities::Executable) - Program files
@@ -105,26 +107,28 @@ pub use crate::vector::{VectorCapabilities, VectorFormat};
 ///
 /// # Conversion
 ///
-/// Each capability type can be converted to/from SAUCE header fields through
-/// their respective `TryFrom<&SauceHeader>` implementations and `encode_into_header()` methods:
+/// Parse header fields using each capability type's `TryFrom<&SauceHeader>`
+/// implementation. Write capabilities through
+/// [`SauceRecordBuilder::capabilities`](crate::SauceRecordBuilder::capabilities):
 ///
-/// ```ignore
-/// // Internal conversion example (ignored because `from` and `encode_into_header` are not public)
+/// ```
 /// use icy_sauce::header::SauceHeader;
-/// use icy_sauce::{CharacterCapabilities, Capabilities, SauceDataType};
+/// use icy_sauce::{Capabilities, SauceDataType, SauceRecordBuilder, VectorCapabilities, VectorFormat};
 ///
 /// // Parse from header
-/// let mut header = SauceHeader::default();
-/// header.data_type = SauceDataType::Character;
-/// use std::convert::TryFrom;
-/// let char_caps = CharacterCapabilities::try_from(&header).unwrap();
-/// let caps = Capabilities::Character(char_caps);
+/// let header = SauceHeader {
+///     data_type: SauceDataType::Vector,
+///     file_type: VectorFormat::Dxf.to_sauce(),
+///     ..SauceHeader::default()
+/// };
+/// let caps = VectorCapabilities::try_from(&header).unwrap();
 ///
-/// // Write back to header
-/// match caps {
-///     Capabilities::Character(c) => c.encode_into_header(&mut header).unwrap(),
-///     _ => {}
-/// }
+/// // Write into a new record through the public builder
+/// let record = SauceRecordBuilder::default()
+///     .capabilities(Capabilities::Vector(caps)).unwrap()
+///     .build();
+/// assert_eq!(record.header().data_type, SauceDataType::Vector);
+/// assert_eq!(record.header().file_type, 0);
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub enum Capabilities {
@@ -140,16 +144,19 @@ pub enum Capabilities {
     /// Contains width, height (for XBin), and display flags.
     Binary(BinaryCapabilities),
 
-    /// Graphics format capabilities.
+    /// Bitmap and RIPScript capabilities.
     ///
-    /// For bitmap (GIF, PNG, JPG, etc.) and vector (DXF, DWG, etc.) formats.
-    /// Contains pixel dimensions and color depth.
+    /// For bitmap images and animations (GIF, PNG, JPG, etc.), plus RIPScript.
+    /// Contains pixel dimensions and color depth. When reading a record,
+    /// [`SauceRecord::capabilities`](crate::SauceRecord::capabilities) returns
+    /// RIPScript as [`Capabilities::Character`] because its DataType is Character;
+    /// use `BitmapCapabilities::try_from(record.header())` for the bitmap view.
     Bitmap(BitmapCapabilities),
 
     /// Vector format capabilities.
     ///
     /// For scalable graphics formats (DXF, DWG, WPG Vector, 3DS).
-    /// Contains vector-specific metadata such as bounding box and layer information.
+    /// Contains only the format identifier, not dimensions, bounding boxes, or layers.
     Vector(VectorCapabilities),
 
     /// Audio format capabilities.

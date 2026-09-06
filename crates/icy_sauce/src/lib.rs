@@ -179,14 +179,16 @@ impl Default for StripMode {
 }
 
 /// Returns the end index of payload after removing one SAUCE record at the tail,
-/// or None if no SAUCE header is found exactly at the tail.
+/// or None if the header or its advertised comment block cannot be validated.
 fn attempt_single_strip(slice: &[u8]) -> Option<usize> {
     let header = SauceHeader::from_bytes(slice).ok().flatten()?;
-    let sauce_len = header.total_length();
-    if slice.len() < sauce_len {
+    let start = slice.len().checked_sub(header.total_length())?;
+    if header.comments > 0 && slice.get(start..start + COMMENT_ID_LEN) != Some(b"COMNT") {
+        // A lenient parser may ignore missing comments, but a destructive
+        // operation must not mistake arbitrary payload bytes for that block.
         return None;
     }
-    Some(slice.len() - sauce_len)
+    Some(start)
 }
 
 /// Consume at most one EOF (0x1A) directly preceding index `end`.
@@ -211,21 +213,12 @@ fn strip_contiguous_records(data: &[u8]) -> Option<usize> {
     let mut cursor = data.len();
     let mut removed_any = false;
 
-    loop {
-        match attempt_single_strip(&data[..cursor]) {
-            Some(end) => {
-                removed_any = true;
-                // Remove the SAUCE record plus one EOF tied to THAT record (if present)
-                let next_cursor = consume_single_eof(data, end);
-                // If no further header exactly at tail we stop and preserve remaining EOFs.
-                if !tail_has_sauce_header(&data[..next_cursor]) {
-                    cursor = next_cursor;
-                    break;
-                }
-                cursor = next_cursor;
-                continue;
-            }
-            None => break,
+    while let Some(end) = attempt_single_strip(&data[..cursor]) {
+        removed_any = true;
+        // Remove the SAUCE record plus one EOF tied to THAT record (if present).
+        cursor = consume_single_eof(data, end);
+        if !tail_has_sauce_header(&data[..cursor]) {
+            break;
         }
     }
     if removed_any { Some(cursor) } else { None }
@@ -248,6 +241,9 @@ fn calculate_strip_position(data: &[u8], mode: StripMode) -> Option<usize> {
 ///
 /// Returns a subslice of the input with SAUCE records and optionally EOF markers removed.
 /// No allocation or copying occurs. Returns the original slice if no SAUCE is found.
+/// An invalid or truncated advertised comment block stops stripping without removing
+/// that record or any of its preceding bytes. This is intentionally stricter than
+/// [`SauceRecord::from_bytes`], which can ignore a missing `COMNT` marker when reading.
 ///
 /// # Arguments
 ///
@@ -363,7 +359,7 @@ pub fn strip_sauce_ex(data: &[u8], mode: StripMode) -> StripResult<'_> {
     let new_end = match mode {
         StripMode::LastStripFinalEof | StripMode::Last => attempt_single_strip(data).map(|end| {
             records = 1;
-            let consumed_end = if mode == StripMode::LastStripFinalEof {
+            if mode == StripMode::LastStripFinalEof {
                 let c = consume_single_eof(data, end);
                 if c != end {
                     eof_count += 1;
@@ -371,26 +367,18 @@ pub fn strip_sauce_ex(data: &[u8], mode: StripMode) -> StripResult<'_> {
                 c
             } else {
                 end
-            };
-            consumed_end
+            }
         }),
         StripMode::All | StripMode::AllStripFinalEof => {
             let mut cursor = data.len();
-            loop {
-                match attempt_single_strip(&data[..cursor]) {
-                    Some(end) => {
-                        records += 1;
-                        let c = consume_single_eof(data, end);
-                        if c != end {
-                            eof_count += 1;
-                        }
-                        if !tail_has_sauce_header(&data[..c]) {
-                            cursor = c;
-                            break;
-                        }
-                        cursor = c;
-                    }
-                    None => break,
+            while let Some(end) = attempt_single_strip(&data[..cursor]) {
+                records += 1;
+                cursor = consume_single_eof(data, end);
+                if cursor != end {
+                    eof_count += 1;
+                }
+                if !tail_has_sauce_header(&data[..cursor]) {
+                    break;
                 }
             }
             if records > 0 {

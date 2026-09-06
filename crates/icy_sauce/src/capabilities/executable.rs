@@ -7,7 +7,7 @@
 //! # SAUCE Field Mappings
 //!
 //! For executable files:
-//! - **DataType**: Always `Executable` (4)
+//! - **DataType**: Always `Executable` (8)
 //! - **FileType**: Always `0` (no subtypes)
 //! - **TInfo1-TInfo4**: Always `0` (no format-specific data)
 //! - **TFlags**: Always `0` (no flags)
@@ -36,8 +36,8 @@ use crate::{SauceDataType, SauceError, header::SauceHeader};
 /// Executable file format capabilities.
 ///
 /// The SAUCE specification treats all executable files uniformly without
-/// format-specific metadata. This is a marker type that stores no data beyond
-/// its type discriminant, simplifying the API for executable-specific SAUCE records.
+/// format-specific metadata. This is a zero-sized marker type for
+/// executable-specific SAUCE records.
 ///
 /// # SAUCE Specification Details
 ///
@@ -77,9 +77,6 @@ impl ExecutableCapabilities {
         ExecutableCapabilities {}
     }
 
-    /// Parse executable capabilities from a SAUCE header via `TryFrom<&SauceHeader>`.
-    /// The bespoke internal `from(&SauceHeader)` has been removed.
-
     /// Serialize executable capabilities into a SAUCE header.
     ///
     /// # Arguments
@@ -89,7 +86,7 @@ impl ExecutableCapabilities {
     /// # SAUCE Field Mappings
     ///
     /// Sets the following fields according to SAUCE spec:
-    /// - **DataType**: `Executable` (4)
+    /// - **DataType**: `Executable` (8)
     /// - **FileType**: `0` (no executable subtypes)
     /// - **TInfo1-TInfo4**: All `0` (no format data)
     /// - **TFlags**: `0` (no rendering flags)
@@ -97,15 +94,14 @@ impl ExecutableCapabilities {
     ///
     /// # Example
     ///
-    /// ```ignore
-    /// // Internal serialization example (ignored because `encode_into_header` is not public)
-    /// # use icy_sauce::{header::SauceHeader};
-    /// # use icy_sauce::ExecutableCapabilities;
+    /// ```
+    /// use icy_sauce::{Capabilities, ExecutableCapabilities, SauceRecordBuilder};
+    ///
     /// let caps = ExecutableCapabilities::new();
-    /// let mut header = SauceHeader::default();
-    /// caps.encode_into_header(&mut header)?;
-    /// assert_eq!(header.file_type, 0);
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// let record = SauceRecordBuilder::default()
+    ///     .capabilities(Capabilities::Executable(caps)).unwrap()
+    ///     .build();
+    /// assert_eq!(record.header().file_type, 0);
     /// ```
     pub(crate) fn encode_into_header(&self, header: &mut SauceHeader) -> crate::Result<()> {
         header.data_type = SauceDataType::Executable;
@@ -127,6 +123,27 @@ impl ExecutableCapabilities {
 
 impl TryFrom<&SauceHeader> for ExecutableCapabilities {
     type Error = SauceError;
+
+    /// Parse the executable marker from a SAUCE header.
+    ///
+    /// Only DataType is checked; FileType and other metadata fields are ignored.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SauceError::UnsupportedDataType`] if DataType is not Executable.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use icy_sauce::{header::SauceHeader, ExecutableCapabilities, SauceDataType};
+    ///
+    /// let header = SauceHeader {
+    ///     data_type: SauceDataType::Executable,
+    ///     ..SauceHeader::default()
+    /// };
+    /// let caps = ExecutableCapabilities::try_from(&header).unwrap();
+    /// assert_eq!(caps, ExecutableCapabilities::new());
+    /// ```
     fn try_from(header: &SauceHeader) -> crate::Result<Self> {
         if header.data_type != SauceDataType::Executable {
             return Err(SauceError::UnsupportedDataType(header.data_type));

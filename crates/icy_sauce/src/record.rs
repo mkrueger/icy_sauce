@@ -109,7 +109,6 @@ impl SauceRecord {
     /// Parsing is O(1) relative to the number of comments (bounded to 255) and otherwise
     /// proportional to the fixed header size. No heap allocations are performed except
     /// for copying comment lines and the header's owned strings.
-    #[must_use]
     pub fn from_bytes(data: &[u8]) -> crate::Result<Option<Self>> {
         let Some(mut header) = SauceHeader::from_bytes(data)? else {
             return Ok(None);
@@ -122,7 +121,7 @@ impl SauceRecord {
                 return Err(SauceError::InvalidCommentBlock);
             }
             let mut cdata = &data[data.len() - expected..];
-            if &cdata[..COMMENT_ID_LEN] != COMMENT_ID {
+            if cdata[..COMMENT_ID_LEN] != COMMENT_ID {
                 // Non-fatal per spec: ignore comments
                 log::warn!("SAUCE comment block missing COMNT ID - ignoring comments");
             } else {
@@ -177,7 +176,6 @@ impl SauceRecord {
     /// # Errors
     /// I/O failures are wrapped in [`SauceError::IoError`]. Structural SAUCE issues yield
     /// specific `SauceError` variants.
-    #[must_use]
     pub fn from_path(path: &std::path::Path) -> crate::Result<Option<Self>> {
         const MAX_SAUCE_WINDOW: u64 = 128 + 5 + 255 * 64 + 1;
         let mut f = File::open(path).map_err(|e| SauceError::io_error(path, e))?;
@@ -243,9 +241,9 @@ impl SauceRecord {
 
         // EOF Char.
         if eof {
-            if let Err(err) = writer.write_all(&[0x1A]) {
-                return Err(SauceError::io_error("<writer>", err));
-            }
+            writer
+                .write_all(&[0x1A])
+                .map_err(|err| SauceError::io_error("<writer>", err))?;
         }
 
         if !self.comments.is_empty() {
@@ -266,7 +264,7 @@ impl SauceRecord {
 
     /// Get the total byte length of this SAUCE record.
     ///
-    /// Returns the total number of bytes that would be written by [`write()`](Self::write),
+    /// Returns the total number of bytes written by [`write_without_eof`](Self::write_without_eof),
     /// including:
     /// - 128 bytes for the SAUCE header
     /// - Optional comment block if comments exist:

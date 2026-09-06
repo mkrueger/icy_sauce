@@ -45,14 +45,7 @@ pub struct MetaData {
 
 impl MetaData {
     pub fn to_builder(&self) -> crate::Result<SauceRecordBuilder> {
-        let mut builder = SauceRecordBuilder::default();
-        builder = builder.title(self.title.clone())?;
-        builder = builder.author(self.author.clone())?;
-        builder = builder.group(self.group.clone())?;
-        for comment in &self.comments {
-            builder = builder.add_comment(comment.clone())?;
-        }
-        Ok(builder)
+        SauceRecordBuilder::default().metadata(self.clone())
     }
 
     pub fn is_empty(&self) -> bool {

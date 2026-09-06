@@ -355,7 +355,7 @@ fn main() -> ExitCode {
     match run(cli) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("Error: {e}");
+            eprintln!("Error: {}", display_text(e.to_string().as_bytes()));
             ExitCode::FAILURE
         }
     }
@@ -387,8 +387,25 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             tflags,
             tinfos,
         } => add_sauce(
-            &file, from_json, title, author, group, date, comment, force, data_type, file_type,
-            tinfo1, tinfo2, tinfo3, tinfo4, tflags, tinfos,
+            &file,
+            from_json,
+            SauceJson {
+                title,
+                author,
+                group,
+                date,
+                comments: (!comment.is_empty()).then_some(comment),
+                data_type,
+                file_type,
+                tinfo1,
+                tinfo2,
+                tinfo3,
+                tinfo4,
+                tflags,
+                tinfos,
+                ..Default::default()
+            },
+            force,
         ),
         Commands::Alter {
             file,
@@ -411,21 +428,24 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         } => alter_sauce(
             &file,
             from_json,
-            title,
-            author,
-            group,
-            date,
-            comment,
+            SauceJson {
+                title,
+                author,
+                group,
+                date,
+                comments: (!comment.is_empty()).then_some(comment),
+                data_type,
+                file_type,
+                tinfo1,
+                tinfo2,
+                tinfo3,
+                tinfo4,
+                tflags,
+                tinfos,
+                ..Default::default()
+            },
             add_comment,
             clear_comments,
-            data_type,
-            file_type,
-            tinfo1,
-            tinfo2,
-            tinfo3,
-            tinfo4,
-            tflags,
-            tinfos,
         ),
         Commands::Remove {
             file,
@@ -436,19 +456,45 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
+/// Render untrusted text without emitting terminal controls or bidi overrides.
+fn display_text(bytes: &[u8]) -> String {
+    let mut output = String::new();
+    for c in bytes.to_str_lossy().chars() {
+        if c.is_control()
+            || matches!(c, '\u{061c}' | '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+        {
+            output.extend(c.escape_default());
+        } else {
+            output.push(c);
+        }
+    }
+    output
+}
+
+fn display_path(path: &Path) -> String {
+    display_text(path.to_string_lossy().as_bytes())
+}
+
+/// Destructive commands must not continue when a comment block is ambiguous.
+fn checked_strip(data: &[u8], mode: StripMode) -> Result<&[u8], Box<dyn std::error::Error>> {
+    let stripped = strip_sauce(data, mode);
+    if stripped.len() == data.len() {
+        return Err("Cannot safely remove SAUCE: invalid or truncated comment block".into());
+    }
+    Ok(stripped)
+}
+
 fn view_sauce(
-    file: &PathBuf,
+    file: &Path,
     show_comments: bool,
     raw: bool,
     json: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let data = fs::read(file)?;
-
-    let Some(sauce) = SauceRecord::from_bytes(&data)? else {
+    let Some(sauce) = SauceRecord::from_path(file)? else {
         if json {
             println!("null");
         } else {
-            println!("No SAUCE record found in '{}'", file.display());
+            println!("No SAUCE record found in '{}'", display_path(file));
         }
         return Ok(());
     };
@@ -457,7 +503,7 @@ fn view_sauce(
         let json_data = SauceJson::from_record(&sauce);
         println!("{}", serde_json::to_string_pretty(&json_data)?);
     } else {
-        println!("SAUCE Information for '{}'", file.display());
+        println!("SAUCE Information for '{}'", display_path(file));
         println!("{}", "=".repeat(60));
 
         if raw {
@@ -471,7 +517,7 @@ fn view_sauce(
             println!("\nComments ({}):", comments.len());
             println!("{}", "-".repeat(40));
             for (i, comment) in comments.iter().enumerate() {
-                println!("  {}: {}", i + 1, comment.to_str_lossy());
+                println!("  {}: {}", i + 1, display_text(comment));
             }
         }
     }
@@ -480,9 +526,9 @@ fn view_sauce(
 }
 
 fn print_formatted(sauce: &SauceRecord) {
-    println!("Title:    {}", sauce.title().to_str_lossy());
-    println!("Author:   {}", sauce.author().to_str_lossy());
-    println!("Group:    {}", sauce.group().to_str_lossy());
+    println!("Title:    {}", display_text(sauce.title()));
+    println!("Author:   {}", display_text(sauce.author()));
+    println!("Group:    {}", display_text(sauce.group()));
 
     let date = sauce.date();
     if date.year != 0 || date.month != 0 || date.day != 0 {
@@ -507,7 +553,7 @@ fn print_formatted(sauce: &SauceRecord) {
                 println!("  Letter Spacing: {:?}", c.letter_spacing);
                 println!("  Aspect Ratio: {:?}", c.aspect_ratio);
                 if let Some(font) = c.font() {
-                    println!("  Font:         {}", font.to_str_lossy());
+                    println!("  Font:         {}", display_text(font));
                 }
             }
             Capabilities::Binary(b) => {
@@ -517,7 +563,7 @@ fn print_formatted(sauce: &SauceRecord) {
                 println!("  Lines:        {}", b.lines);
                 println!("  ICE Colors:   {}", b.ice_colors);
                 if let Some(font) = b.font() {
-                    println!("  Font:         {}", font.to_str_lossy());
+                    println!("  Font:         {}", display_text(font));
                 }
             }
             Capabilities::Bitmap(b) => {
@@ -637,22 +683,10 @@ fn read_json_input(path: &str) -> Result<SauceJson, Box<dyn std::error::Error>> 
 }
 
 fn add_sauce(
-    file: &PathBuf,
+    file: &Path,
     from_json: Option<String>,
-    title: Option<String>,
-    author: Option<String>,
-    group: Option<String>,
-    date: Option<String>,
-    comments: Vec<String>,
+    overrides: SauceJson,
     force: bool,
-    data_type: Option<u8>,
-    file_type: Option<u8>,
-    tinfo1: Option<u16>,
-    tinfo2: Option<u16>,
-    tinfo3: Option<u16>,
-    tinfo4: Option<u16>,
-    tflags: Option<u8>,
-    tinfos: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Load JSON input if provided
     let json = from_json.as_ref().map(|p| read_json_input(p)).transpose()?;
@@ -660,13 +694,14 @@ fn add_sauce(
     let data = fs::read(file)?;
 
     // Check if SAUCE already exists
-    if SauceRecord::from_bytes(&data)?.is_some() && !force {
+    let has_sauce = SauceRecord::from_bytes(&data)?.is_some();
+    if has_sauce && !force {
         return Err("File already has SAUCE metadata. Use --force to overwrite.".into());
     }
 
     // Strip existing SAUCE if force is set
-    let content = if force {
-        strip_sauce(&data, StripMode::LastStripFinalEof).to_vec()
+    let content = if has_sauce {
+        checked_strip(&data, StripMode::LastStripFinalEof)?.to_vec()
     } else {
         data
     };
@@ -674,22 +709,6 @@ fn add_sauce(
     // Zero denotes an unknown size for payloads too large for the wire field.
     let builder =
         SauceRecordBuilder::default().file_size(u32::try_from(content.len()).unwrap_or(0));
-    let overrides = SauceJson {
-        title,
-        author,
-        group,
-        date,
-        comments: (!comments.is_empty()).then_some(comments),
-        data_type,
-        file_type,
-        tinfo1,
-        tinfo2,
-        tinfo3,
-        tinfo4,
-        tflags,
-        tinfos,
-        ..Default::default()
-    };
     let builder = json
         .unwrap_or_default()
         .overlay(overrides)
@@ -701,28 +720,16 @@ fn add_sauce(
     sauce.write(&mut output)?;
     write_atomic(file, |writer| writer.write_all(&output))?;
 
-    println!("SAUCE metadata added to '{}'", file.display());
+    println!("SAUCE metadata added to '{}'", display_path(file));
     Ok(())
 }
 
 fn alter_sauce(
-    file: &PathBuf,
+    file: &Path,
     from_json: Option<String>,
-    title: Option<String>,
-    author: Option<String>,
-    group: Option<String>,
-    date: Option<String>,
-    replace_comments: Vec<String>,
+    mut overrides: SauceJson,
     add_comments: Vec<String>,
     clear_comments: bool,
-    data_type: Option<u8>,
-    file_type: Option<u8>,
-    tinfo1: Option<u16>,
-    tinfo2: Option<u16>,
-    tinfo3: Option<u16>,
-    tinfo4: Option<u16>,
-    tflags: Option<u8>,
-    tinfos: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Load JSON input if provided
     let json = from_json.as_ref().map(|p| read_json_input(p)).transpose()?;
@@ -734,29 +741,12 @@ fn alter_sauce(
     };
 
     // Strip the existing SAUCE to get the content
-    let content = strip_sauce(&data, StripMode::LastStripFinalEof);
+    let content = checked_strip(&data, StripMode::LastStripFinalEof)?;
 
     // Preserve all untouched byte strings, file size, and raw format fields.
-    let overrides = SauceJson {
-        title,
-        author,
-        group,
-        date,
-        comments: if clear_comments {
-            Some(Vec::new())
-        } else {
-            (!replace_comments.is_empty()).then_some(replace_comments)
-        },
-        data_type,
-        file_type,
-        tinfo1,
-        tinfo2,
-        tinfo3,
-        tinfo4,
-        tflags,
-        tinfos,
-        ..Default::default()
-    };
+    if clear_comments {
+        overrides.comments = Some(Vec::new());
+    }
     let mut builder = json
         .unwrap_or_default()
         .overlay(overrides)
@@ -773,20 +763,16 @@ fn alter_sauce(
     sauce.write(&mut output)?;
     write_atomic(file, |writer| writer.write_all(&output))?;
 
-    println!("SAUCE metadata updated in '{}'", file.display());
+    println!("SAUCE metadata updated in '{}'", display_path(file));
     Ok(())
 }
 
-fn remove_sauce(
-    file: &PathBuf,
-    all: bool,
-    strip_eof: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
+fn remove_sauce(file: &Path, all: bool, strip_eof: bool) -> Result<(), Box<dyn std::error::Error>> {
     let data = fs::read(file)?;
 
     // Check if there's actually SAUCE to remove
     if SauceRecord::from_bytes(&data)?.is_none() {
-        println!("No SAUCE record found in '{}'", file.display());
+        println!("No SAUCE record found in '{}'", display_path(file));
         return Ok(());
     }
 
@@ -797,7 +783,7 @@ fn remove_sauce(
         (true, true) => StripMode::AllStripFinalEof,
     };
 
-    let stripped = strip_sauce(&data, mode);
+    let stripped = checked_strip(&data, mode)?;
     write_atomic(file, |writer| writer.write_all(stripped))?;
 
     let records = if all {
@@ -805,7 +791,7 @@ fn remove_sauce(
     } else {
         "SAUCE record"
     };
-    println!("{} removed from '{}'", records, file.display());
+    println!("{} removed from '{}'", records, display_path(file));
     Ok(())
 }
 
@@ -840,8 +826,8 @@ DataType Values:
   1 = Character   Text/ANSI art (ANS, ASC, PCB, etc.)
   2 = Bitmap      Graphics (GIF, JPG, PNG, BMP, etc.)
   3 = Vector      Vector graphics (DXF, etc.)
-  4 = Audio       Sound files (MOD, S3M, XM, MP3, etc.)
-  5 = BinaryText  Binary text with fixed 160-column width
+    4 = Audio       Sound files (MOD, S3M, XM, WAV, etc.)
+    5 = BinaryText  Binary text with width encoded in FileType
   6 = XBin        Extended Binary format
   7 = Archive     Compressed archives (ZIP, ARJ, LZH, etc.)
   8 = Executable  Executable files
@@ -879,15 +865,16 @@ BinaryText Width Encoding (DataType=5):
   BinaryText files contain raw character+attribute pairs (2 bytes each).
   The width is encoded in the FileType field, NOT in TInfo1!
   
-  FileType = (actual_width / 2) - 1
+    FileType = actual_width / 2
   
   This means:
-    FileType 0   = 2 columns   (2 / 2 - 1 = 0)
-    FileType 39  = 80 columns  (80 / 2 - 1 = 39)  <- most common
-    FileType 79  = 160 columns (160 / 2 - 1 = 79)
-    FileType 255 = 512 columns (maximum)
+    FileType 1   = 2 columns
+    FileType 40  = 80 columns  <- most common
+    FileType 80  = 160 columns
+    FileType 255 = 510 columns (maximum)
+    FileType 0 is invalid for BinaryText.
   
-  To decode: actual_width = (FileType + 1) * 2
+    To decode: actual_width = FileType * 2
   
   Height is calculated from file size:
     height = file_size / (width * 2)

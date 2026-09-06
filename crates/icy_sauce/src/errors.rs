@@ -21,7 +21,7 @@ pub enum SauceError {
     #[error("Unsupported data type for operation: {0:?}")]
     UnsupportedDataType(SauceDataType),
 
-    #[error("IO error reading '{path}': {source}")]
+    #[error("IO error for '{path}': {source}")]
     IoError {
         path: PathBuf,
         #[source]
@@ -43,8 +43,11 @@ pub enum SauceError {
     #[error("Group too long: {0} bytes only up to 20 bytes are allowed.")]
     GroupTooLong(usize),
 
-    #[error("Font name too long: {0} bytes only up to 22 bytes are allowed.")]
+    #[error("Font name too long: {0} bytes only up to 21 bytes are allowed.")]
     FontNameTooLong(usize),
+
+    #[error("Font name must not contain a NUL byte")]
+    InvalidFontName,
 
     #[error("TInfoS too long: {0} bytes only up to 22 bytes are allowed.")]
     TInfoSTooLong(usize),

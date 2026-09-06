@@ -11,7 +11,7 @@
 //! - **Width**: Even number, 2-510 characters (stored as FileType = width/2)
 //! - **Height**: Derived from FileSize (width × 2 bytes per row)
 //! - **Colors**: Supports ICE colors (16 background colors)
-//! - **Font**: Optional (max 22 bytes)
+//! - **Font**: Optional (max 21 bytes plus a NUL terminator)
 //! - **Rendering**: Letter spacing and aspect ratio support
 //!
 //! ## XBIN (DataType = 6)
@@ -40,7 +40,7 @@
 
 use bstr::BString;
 
-use crate::limits;
+use crate::util::{decode_font, validate_font};
 use crate::{SauceDataType, SauceError, header::SauceHeader};
 
 use crate::character::{
@@ -113,7 +113,7 @@ impl BinaryFormat {
 /// - **Width**: Even number from 2 to 510 characters (stored as FileType = width/2)
 /// - **Height**: Derived from FileSize (bytes_per_row = width × 2)
 /// - **Flags**: ANSi flags for ICE colors, letter spacing, aspect ratio
-/// - **Font**: Optional font name (max 22 bytes, zero-padded in SAUCE)
+/// - **Font**: Optional font name (max 21 bytes, NUL-terminated in SAUCE)
 ///
 /// SAUCE Field Mappings:
 /// - FileType: width/2 (must result in even number ≤ 510)
@@ -165,7 +165,8 @@ pub struct BinaryCapabilities {
     pub letter_spacing: LetterSpacing,
     /// Pixel aspect ratio for rendering
     pub aspect_ratio: AspectRatio,
-    /// Optional font name (max 22 bytes)
+    /// Optional font name (max 21 bytes for writing; no embedded NULs).
+    /// Legacy files may decode longer names; raw edits via `to_builder` preserve them.
     pub font_opt: Option<BString>,
 }
 
@@ -192,7 +193,7 @@ impl BinaryCapabilities {
     /// assert_eq!(binary_text.columns, 80);
     /// ```
     pub fn binary_text(columns: u16) -> crate::Result<Self> {
-        if columns == 0 || columns % 2 != 0 || columns > 510 {
+        if columns == 0 || !columns.is_multiple_of(2) || columns > 510 {
             return Err(SauceError::BinFileWidthLimitExceeded(columns as i32));
         }
         Ok(Self {
@@ -268,16 +269,17 @@ impl BinaryCapabilities {
     ///
     /// # Arguments
     ///
-    /// * `font` - The font name to set (max 22 bytes), or empty to clear
+    /// * `font` - The font name to set (max 21 bytes), or empty to clear
     ///
     /// # Errors
     ///
-    /// Returns [`SauceError::FontNameTooLong`] if the font name exceeds 22 bytes.
+    /// Returns [`SauceError::FontNameTooLong`] above 21 bytes, or
+    /// [`SauceError::InvalidFontName`] for embedded NUL bytes.
     ///
     /// # Behavior
     ///
-    /// - Passing an empty `BString` clears the font (equivalent to [`clear_font`](Self::clear_font))
-    /// - Non-empty strings up to 22 bytes are stored
+    /// - Passing an empty `BString` clears the font (equivalent to [`remove_font`](Self::remove_font))
+    /// - Non-empty strings up to 21 bytes are stored
     ///
     /// # Example
     ///
@@ -289,9 +291,7 @@ impl BinaryCapabilities {
     /// assert_eq!(caps.font(), Some(&BString::from("IBM VGA")));
     /// ```
     pub fn set_font(&mut self, font: BString) -> crate::Result<()> {
-        if font.len() > limits::MAX_FONT_NAME_LENGTH {
-            return Err(SauceError::FontNameTooLong(font.len()));
-        }
+        validate_font(&font)?;
         if font.is_empty() {
             self.font_opt = None;
             return Ok(());
@@ -316,50 +316,6 @@ impl BinaryCapabilities {
         self.font_opt = None;
     }
 
-    /// Parse binary text capabilities from a SAUCE header.
-    ///
-    /// # Arguments
-    ///
-    /// * `header` - The SAUCE header to parse
-    ///
-    /// # Returns
-    ///
-    /// Binary text capabilities extracted from header fields.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`SauceError::UnsupportedDataType`] if DataType is neither BinaryText nor XBIN.
-    /// Returns [`SauceError::BinFileWidthLimitExceeded`] if width is 0 or invalid.
-    ///
-    /// # Format-Specific Parsing
-    ///
-    /// **BinaryText**:
-    /// - Width: (FileType × 2)
-    /// - Flags: TFlags field
-    /// - Font: TInfoS field (if non-empty)
-    ///
-    /// **XBIN**:
-    /// - Width: TInfo1
-    /// - Height: TInfo2
-    /// - Flags/Font: Ignored
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use icy_sauce::{header::SauceHeader, SauceDataType};
-    /// use icy_sauce::BinaryCapabilities;
-    ///
-    /// let mut header = SauceHeader::default();
-    /// header.data_type = SauceDataType::BinaryText;
-    /// header.file_type = 40; // width = 80
-    /// use std::convert::TryFrom;
-    /// let caps = BinaryCapabilities::try_from(&header).unwrap();
-    /// assert_eq!(caps.columns, 80);
-    /// ```
-    /// This example uses the `TryFrom<&SauceHeader>` implementation on `BinaryCapabilities`.
-    /// The bespoke `from(&SauceHeader)` constructor has been removed in favor of the
-    /// standard conversion trait.
-
     /// Serialize binary text capabilities into a SAUCE header.
     ///
     /// # Arguments
@@ -368,7 +324,9 @@ impl BinaryCapabilities {
     ///
     /// # Errors
     ///
-    /// Returns [`SauceError::BinFileWidthLimitExceeded`] if BinaryText width is invalid.
+    /// Returns [`SauceError::BinFileWidthLimitExceeded`] if BinaryText width is invalid,
+    /// [`SauceError::FontNameTooLong`] above 21 font bytes, or
+    /// [`SauceError::InvalidFontName`] for an embedded NUL in the font.
     ///
     /// # Behavior
     ///
@@ -401,7 +359,7 @@ impl BinaryCapabilities {
         match self.format {
             BinaryFormat::BinaryText => {
                 header.data_type = SauceDataType::BinaryText;
-                if self.columns == 0 || self.columns % 2 != 0 || self.columns > 510 {
+                if self.columns == 0 || !self.columns.is_multiple_of(2) || self.columns > 510 {
                     return Err(SauceError::BinFileWidthLimitExceeded(self.columns as i32));
                 }
                 header.file_type = (self.columns / 2) as u8;
@@ -434,9 +392,7 @@ impl BinaryCapabilities {
                 };
 
                 if let Some(font) = &self.font_opt {
-                    if font.len() > limits::MAX_FONT_NAME_LENGTH {
-                        return Err(SauceError::FontNameTooLong(font.len()));
-                    }
+                    validate_font(font)?;
                     header.t_info_s.clone_from(font);
                 } else {
                     header.t_info_s.clear();
@@ -507,6 +463,24 @@ impl BinaryCapabilities {
 
 impl TryFrom<&SauceHeader> for BinaryCapabilities {
     type Error = SauceError;
+
+    /// Decode BinaryText or XBin capabilities from a raw header.
+    ///
+    /// BinaryText width is `FileType * 2`; fonts stop at the first NUL. XBin
+    /// dimensions come from TInfo1/2, with flags and fonts ignored. Other data types
+    /// return [`SauceError::UnsupportedDataType`]; zero BinaryText width returns
+    /// [`SauceError::BinFileWidthLimitExceeded`].
+    ///
+    /// ```
+    /// use icy_sauce::{BinaryCapabilities, SauceDataType, header::SauceHeader};
+    /// let header = SauceHeader {
+    ///     data_type: SauceDataType::BinaryText,
+    ///     file_type: 40,
+    ///     ..Default::default()
+    /// };
+    /// let caps = BinaryCapabilities::try_from(&header).unwrap();
+    /// assert_eq!(caps.columns, 80);
+    /// ```
     fn try_from(header: &SauceHeader) -> crate::Result<Self> {
         let format = BinaryFormat::from_data_type(header.data_type)?;
         match format {
@@ -529,11 +503,7 @@ impl TryFrom<&SauceHeader> for BinaryCapabilities {
                     ANSI_ASPECT_RATIO_SQUARE => AspectRatio::Square,
                     _ => AspectRatio::Reserved,
                 };
-                let font_opt = if header.t_info_s.is_empty() {
-                    None
-                } else {
-                    Some(header.t_info_s.clone())
-                };
+                let font_opt = decode_font(&header.t_info_s);
                 Ok(Self {
                     format,
                     columns: width,

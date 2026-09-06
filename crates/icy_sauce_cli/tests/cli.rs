@@ -329,3 +329,91 @@ fn atomic_updates_preserve_permissions_and_follow_symlinks() {
     assert_eq!(fs::read(target).unwrap(), PAYLOAD);
     assert_eq!(fs::read_dir(fixture.dir.path()).unwrap().count(), 2);
 }
+
+#[test]
+fn malformed_comment_blocks_cannot_be_modified_or_removed() {
+    use icy_sauce::header::SauceHeader;
+
+    for comments in [1, 255] {
+        let fixture = Fixture::new(None);
+        let mut original = vec![b'A'; 100];
+        original.push(0x1a);
+        SauceHeader {
+            comments,
+            ..Default::default()
+        }
+        .write(&mut original)
+        .unwrap();
+        fs::write(&fixture.file, &original).unwrap();
+        for (operation, args) in [
+            ("alter", vec!["--title", "Changed"]),
+            ("add", vec!["--force"]),
+            ("remove", vec![]),
+            ("remove", vec!["--all", "--strip-eof"]),
+        ] {
+            let output = fixture.command(operation).args(args).output().unwrap();
+            assert_eq!(output.status.code(), Some(1));
+            assert_eq!(fs::read(&fixture.file).unwrap(), original);
+        }
+    }
+}
+
+#[test]
+fn terminal_controls_are_escaped_in_metadata_but_json_retains_values() {
+    let original = SauceRecordBuilder::default()
+        .title("Title\x1b[31m".into())
+        .unwrap()
+        .author("Author\r\nSpoof".into())
+        .unwrap()
+        .group("Group\u{85}\u{202e}".into())
+        .unwrap()
+        .t_info_s("Font\x1b[1m".into())
+        .unwrap()
+        .add_comment("Comment\x07\t\x1b[2J".into())
+        .unwrap()
+        .build();
+    let fixture = Fixture::new(Some(&original));
+    for args in [vec!["--comments"], vec!["--raw", "--comments"]] {
+        let output = fixture.command("view").args(args).output().unwrap();
+        assert!(output.status.success());
+        let text = String::from_utf8(output.stdout).unwrap();
+        assert!(text.chars().all(|c| !c.is_control() || c == '\n'));
+        assert!(!text.contains('\u{202e}'));
+        assert!(text.contains("\\u{1b}[2J"));
+    }
+    let output = fixture.command("view").arg("--json").output().unwrap();
+    let metadata: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(metadata["title"], "Title\x1b[31m");
+}
+
+#[cfg(unix)]
+#[test]
+fn terminal_controls_in_paths_are_escaped() {
+    let mut fixture = Fixture::new(None);
+    let renamed = fixture.dir.path().join("art\x1b[31m.ans");
+    fs::rename(&fixture.file, &renamed).unwrap();
+    fixture.file = renamed;
+    for operation in ["add", "view", "alter", "remove"] {
+        let output = fixture.command(operation).output().unwrap();
+        assert!(output.status.success());
+        assert!(!output.stdout.contains(&0x1b));
+        assert!(
+            String::from_utf8(output.stdout)
+                .unwrap()
+                .contains("\\u{1b}")
+        );
+    }
+}
+
+#[test]
+fn info_reports_actual_binary_text_width_encoding() {
+    let output = Command::new(env!("CARGO_BIN_EXE_sauce"))
+        .arg("info")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(text.contains("FileType = actual_width / 2"));
+    assert!(text.contains("FileType 40  = 80 columns"));
+    assert!(text.contains("FileType 255 = 510 columns"));
+}

@@ -1,10 +1,13 @@
 #![no_main]
-use libfuzzer_sys::fuzz_target;
+
 use icy_sauce::header::SauceHeader;
+use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {
-    // Try interpreting tail bytes as potential header+record
-    if data.len() >= 128 {
-        let _ = SauceHeader::from_bytes(data);
+    if let Ok(Some(header)) = SauceHeader::from_bytes(data) {
+        let mut encoded = Vec::new();
+        header.write(&mut encoded).unwrap();
+        assert_eq!(encoded.len(), 128);
+        assert_eq!(SauceHeader::from_bytes(&encoded).unwrap(), Some(header));
     }
 });

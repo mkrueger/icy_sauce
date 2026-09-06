@@ -32,5 +32,5 @@ pub const MAX_COMMENTS: usize = 255;
 /// Exact number of bytes for the date field (CCYYMMDD ASCII digits).
 pub const DATE_LENGTH: usize = 8;
 
-/// Maximum number of bytes for the font name in binary capabilities.
-pub const MAX_FONT_NAME_LENGTH: usize = 22;
+/// Maximum font name length, reserving one byte of TInfoS for the NUL terminator.
+pub const MAX_FONT_NAME_LENGTH: usize = 21;

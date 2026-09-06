@@ -1,17 +1,14 @@
-//! Graphics format capabilities as specified in the SAUCE v00 standard.
+//! Bitmap and RIPScript capabilities for SAUCE metadata.
 //!
-//! This module provides types for describing graphics files (bitmap, vector, and RIPScript)
-//! stored with SAUCE metadata. Supported formats include common image, animation, and vector types.
+//! This module provides types for describing bitmap images, animations, and RIPScript.
+//! Vector graphics are handled separately by [`crate::vector`].
 //!
 //! # Format Categories
 //!
-//! **Bitmap Formats** (DataType=1): Raster image and animation formats
+//! **Bitmap Formats** (DataType=2): Raster image and animation formats
 //! - GIF, PCX, LBM/IFF, TGA, FLI, FLC, BMP, GL, DL, WPG, PNG, JPG, MPEG, AVI
 //!
-//! **Vector Formats** (DataType=2): Scalable graphics formats
-//! - DXF, DWG, WPG (vector), 3DS
-//!
-//! **Special Format**: RIPScript (DataType=0 with FileType=3)
+//! **Special Format**: RIPScript (DataType=1 with FileType=3)
 //! - Character-based graphics with fixed 640x350 pixel dimensions
 //!
 //! # Example
@@ -27,10 +24,10 @@
 use crate::{SauceDataType, SauceError, header::SauceHeader};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-/// Graphics format types supported by the SAUCE v00 specification.
+/// Bitmap and RIPScript format types for SAUCE metadata.
 ///
-/// `BitmapFormat` enumerates all bitmap, vector, and special graphics formats
-/// that can be stored with SAUCE metadata. Formats are organized by data type:
+/// `BitmapFormat` enumerates bitmap formats and the special RIPScript format.
+/// Vector formats use [`crate::VectorFormat`] instead.
 ///
 /// # Bitmap Formats (DataType::Bitmap)
 ///
@@ -49,14 +46,6 @@ use crate::{SauceDataType, SauceError, header::SauceHeader};
 /// - **Jpg** (11): JPEG Image Format
 /// - **Mpg** (12): MPEG video
 /// - **Avi** (13): Audio Video Interleave
-///
-/// # Vector Formats (DataType::Vector)
-///
-/// Scalable graphics formats without pixel dimensions (values 0-3):
-/// - **Dxf** (0): AutoCAD Drawing Exchange Format
-/// - **Dwg** (1): AutoCAD Drawing Format
-/// - **WpgVector** (2): WordPerfect Graphics (vector)
-/// - **ThreeDs** (3): Autodesk 3D Studio
 ///
 /// # Special Format
 ///
@@ -134,7 +123,7 @@ impl BitmapFormat {
     ///
     /// - RIPScript: DataType=Character with FileType=3
     /// - Bitmap formats: DataType=Bitmap with FileType 0-13
-    /// - Vector formats: DataType=Vector with FileType 0-3
+    /// - Other data types, including Vector, produce [`BitmapFormat::Unknown`]
     ///
     /// # Example
     ///
@@ -212,17 +201,18 @@ impl BitmapFormat {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-/// Graphics/pixel format capabilities.
+/// Bitmap and RIPScript capabilities.
 ///
-/// `BitmapCapabilities` describes bitmap or vector graphics files stored with SAUCE metadata,
-/// including format type, resolution, and color depth for bitmap images.
+/// `BitmapCapabilities` describes bitmap images, animations, and RIPScript,
+/// including format, resolution, and color depth. Vector formats use
+/// [`crate::VectorCapabilities`] instead.
 ///
 /// # Fields
 ///
 /// - **format**: The graphics format type (see [`BitmapFormat`])
-/// - **width**: Image width in pixels (0 for vector formats)
-/// - **height**: Image height in pixels (0 for vector formats)
-/// - **pixel_depth**: Color depth in bits per pixel (0 for vector formats)
+/// - **width**: Image width in pixels
+/// - **height**: Image height in pixels
+/// - **pixel_depth**: Bits per pixel for bitmap images; 16 for RIPScript
 ///
 /// # Format-Specific Values
 ///
@@ -231,13 +221,13 @@ impl BitmapFormat {
 /// - TInfo2: Height (pixels)
 /// - TInfo3: Bit depth (bits per pixel)
 ///
-/// **Vector Formats**: No pixel information (all dimensions = 0)
-/// - TInfo1-3: Always 0
-///
 /// **RIPScript**: Fixed 640×350, 16-color display
 /// - Width: 640 pixels (fixed)
 /// - Height: 350 pixels (fixed)
-/// - Pixel depth: 16 colors (fixed)
+/// - Pixel depth: This API reads and writes the value 16 (color count, not bits per pixel)
+///
+/// [`Self::new`] initializes all dimensions to 0, including for RIPScript.
+/// RIPScript's fixed values are applied when encoding or parsing a header.
 ///
 /// # Example
 ///
@@ -257,7 +247,7 @@ pub struct BitmapCapabilities {
     pub width: u16,
     /// Image height in pixels
     pub height: u16,
-    /// Color depth in bits per pixel
+    /// Color depth in bits per pixel for bitmaps; 16 (color count) for RIPScript
     pub pixel_depth: u16,
 }
 
@@ -290,48 +280,6 @@ impl BitmapCapabilities {
         }
     }
 
-    /// Parse graphics capabilities from a SAUCE header.
-    ///
-    /// Extracts format and dimensions based on the data type and format.
-    ///
-    /// # Arguments
-    ///
-    /// * `header` - The SAUCE header to parse
-    ///
-    /// # Returns
-    ///
-    /// Graphics capabilities with format-specific dimensions and pixel depth.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`SauceError::UnsupportedDataType`] if DataType is not Bitmap or Vector.
-    ///
-    /// # Format-Specific Parsing
-    ///
-    /// - **Bitmap/Vector formats**: Width from TInfo1, Height from TInfo2, Depth from TInfo3
-    /// - **RIPScript**: Fixed 640×350 @ 16 colors (4 bits)
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// // Internal parsing example (ignored because `BitmapCapabilities::from` is not public)
-    /// use icy_sauce::{header::SauceHeader, SauceDataType};
-    /// use icy_sauce::{BitmapCapabilities, BitmapFormat};
-    ///
-    /// let mut header = SauceHeader::default();
-    /// header.data_type = SauceDataType::Bitmap;
-    /// header.file_type = 10; // PNG
-    /// header.t_info1 = 640;
-    /// header.t_info2 = 480;
-    /// header.t_info3 = 24;
-    /// use std::convert::TryFrom;
-    /// let caps = BitmapCapabilities::try_from(&header).unwrap();
-    /// assert_eq!(caps.format, BitmapFormat::Png);
-    /// assert_eq!(caps.width, 640);
-    /// ```
-    /// The bespoke internal `from(&SauceHeader)` has been replaced by a `TryFrom<&SauceHeader>`
-    /// implementation for idiomatic conversion.
-
     /// Serialize graphics capabilities into a SAUCE header.
     ///
     /// # Arguments
@@ -345,21 +293,19 @@ impl BitmapCapabilities {
     /// # Behavior
     ///
     /// Sets header fields based on format:
-    /// - DataType = Bitmap or Vector (based on format)
+    /// - DataType = Bitmap, Character for RIPScript, or the preserved unknown data type
     /// - FileType = Format variant
     /// - TInfo1 = Width (or 640 for RIPScript)
     /// - TInfo2 = Height (or 350 for RIPScript)
-    /// - TInfo3 = Pixel depth (or 4 for RIPScript)
-    /// - TInfo4 = 0
-    /// - TFlags = 0
-    /// - TInfoS = Empty
+    /// - TInfo3 = Pixel depth (or 16 for RIPScript)
+    /// - TInfo4 = 0 for known formats; unchanged for unknown formats
+    /// - TFlags = 0 for known formats; unchanged for unknown formats
+    /// - TInfoS = Empty for known formats; unchanged for unknown formats
     ///
     /// # Example
     ///
-    /// ```ignore
-    /// // Internal serialization example (ignored because `encode_into_header` is not public)
-    /// use icy_sauce::{BitmapCapabilities, BitmapFormat};
-    /// use icy_sauce::header::SauceHeader;
+    /// ```
+    /// use icy_sauce::{BitmapCapabilities, BitmapFormat, Capabilities, SauceRecordBuilder};
     /// use icy_sauce::SauceDataType;
     ///
     /// let caps = BitmapCapabilities {
@@ -368,10 +314,11 @@ impl BitmapCapabilities {
     ///     height: 600,
     ///     pixel_depth: 32,
     /// };
-    /// let mut header = SauceHeader::default();
-    /// caps.encode_into_header(&mut header).unwrap();
-    /// assert_eq!(header.data_type, SauceDataType::Bitmap);
-    /// assert_eq!(header.t_info1, 800);
+    /// let record = SauceRecordBuilder::default()
+    ///     .capabilities(Capabilities::Bitmap(caps)).unwrap()
+    ///     .build();
+    /// assert_eq!(record.header().data_type, SauceDataType::Bitmap);
+    /// assert_eq!(record.header().t_info1, 800);
     /// ```
     pub(crate) fn encode_into_header(&self, header: &mut SauceHeader) -> crate::Result<()> {
         let (data_type, file_type) = self.format.to_sauce();
@@ -452,6 +399,44 @@ impl BitmapCapabilities {
 
 impl TryFrom<&SauceHeader> for BitmapCapabilities {
     type Error = SauceError;
+
+    /// Parse bitmap or RIPScript capabilities from a SAUCE header.
+    ///
+    /// Bitmap records read width, height, and pixel depth from TInfo1-3.
+    /// RIPScript (Character with FileType 3) returns fixed values of 640, 350,
+    /// and 16, regardless of the header's TInfo fields. Here 16 is the color
+    /// count, not bits per pixel. Unknown bitmap file types are preserved.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SauceError::UnsupportedDataType`] for data types other than
+    /// Bitmap or Character with FileType 3, including Vector.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use icy_sauce::{header::SauceHeader, SauceDataType, BitmapCapabilities, BitmapFormat};
+    ///
+    /// let mut header = SauceHeader {
+    ///     data_type: SauceDataType::Bitmap,
+    ///     file_type: 10, // PNG
+    ///     t_info1: 640,
+    ///     t_info2: 480,
+    ///     t_info3: 24,
+    ///     ..SauceHeader::default()
+    /// };
+    /// let caps = BitmapCapabilities::try_from(&header).unwrap();
+    /// assert_eq!(caps.format, BitmapFormat::Png);
+    /// assert_eq!((caps.width, caps.height, caps.pixel_depth), (640, 480, 24));
+    ///
+    /// header.data_type = SauceDataType::Character;
+    /// header.file_type = 3; // RIPScript
+    /// let caps = BitmapCapabilities::try_from(&header).unwrap();
+    /// assert_eq!((caps.width, caps.height, caps.pixel_depth), (640, 350, 16));
+    ///
+    /// header.data_type = SauceDataType::Vector;
+    /// assert!(BitmapCapabilities::try_from(&header).is_err());
+    /// ```
     fn try_from(header: &SauceHeader) -> crate::Result<Self> {
         let graphics_format = BitmapFormat::from_sauce(header.data_type, header.file_type);
         let (width, height, pixel_depth) = match header.data_type {

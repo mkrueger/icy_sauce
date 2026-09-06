@@ -35,7 +35,11 @@
 
 use bstr::BString;
 
-use crate::{SauceDataType, SauceError, header::SauceHeader, limits};
+use crate::{
+    SauceDataType, SauceError,
+    header::SauceHeader,
+    util::{decode_font, validate_font},
+};
 
 /// ANSI flags bitmask for non-blink mode (ice colors).
 /// When set (bit 0), the 16 background colors become available instead of blinking.
@@ -291,7 +295,7 @@ impl AspectRatio {
 /// # Field Constraints
 ///
 /// - **Width/Height**: Range depends on format; typically 0-65535
-/// - **Font Name**: Max 22 bytes (space-padded in SAUCE header TInfoS field)
+/// - **Font Name**: Max 21 bytes plus a NUL terminator in the SAUCE TInfoS field
 /// - **ICE Colors**: Only for ANSI-compatible formats
 /// - **Letter Spacing/Aspect Ratio**: Only for ANSI-compatible formats
 ///
@@ -319,7 +323,8 @@ pub struct CharacterCapabilities {
     pub letter_spacing: LetterSpacing,
     /// Pixel aspect ratio for rendering
     pub aspect_ratio: AspectRatio,
-    /// Optional font name (max 22 bytes)
+    /// Optional font name (max 21 bytes for writing; no embedded NULs).
+    /// Legacy files may decode longer names; raw edits via `to_builder` preserve them.
     pub font_opt: Option<BString>,
 }
 
@@ -368,16 +373,17 @@ impl CharacterCapabilities {
     /// # Arguments
     ///
     /// * `format` - The character encoding format
-    /// * `width` - Display width in characters
-    /// * `height` - Display height in characters (lines)
+    /// * `columns` - Display width in characters
+    /// * `lines` - Display height in characters (lines)
     /// * `ice_colors` - Whether ICE colors (16 background colors) are available
     /// * `letter_spacing` - Letter spacing mode for rendering
     /// * `aspect_ratio` - Pixel aspect ratio for rendering
-    /// * `font` - Optional font name (max 22 bytes)
+    /// * `font` - Optional font name (max 21 bytes)
     ///
     /// # Errors
     ///
-    /// Returns [`SauceError::FontNameTooLong`] if the font name exceeds 22 bytes.
+    /// Returns [`SauceError::FontNameTooLong`] above 21 bytes, or
+    /// [`SauceError::InvalidFontName`] for embedded NUL bytes.
     ///
     /// # Example
     ///
@@ -404,11 +410,9 @@ impl CharacterCapabilities {
         aspect_ratio: AspectRatio,
         font: Option<BString>,
     ) -> crate::Result<Self> {
-        // Validate font length if provided
+        // Validate font length and termination if provided.
         if let Some(ref f) = font {
-            if f.len() > limits::MAX_FONT_NAME_LENGTH {
-                return Err(SauceError::FontNameTooLong(f.len()));
-            }
+            validate_font(f)?;
         }
 
         Ok(CharacterCapabilities {
@@ -444,16 +448,17 @@ impl CharacterCapabilities {
     ///
     /// # Arguments
     ///
-    /// * `font` - The font name to set (max 22 bytes), or empty to clear
+    /// * `font` - The font name to set (max 21 bytes), or empty to clear
     ///
     /// # Errors
     ///
-    /// Returns [`SauceError::FontNameTooLong`] if the font name exceeds 22 bytes.
+    /// Returns [`SauceError::FontNameTooLong`] above 21 bytes, or
+    /// [`SauceError::InvalidFontName`] for embedded NUL bytes.
     ///
     /// # Behavior
     ///
-    /// - Passing an empty `BString` clears the font (equivalent to [`clear_font`](Self::clear_font))
-    /// - Non-empty strings up to 22 bytes are stored
+    /// - Passing an empty `BString` clears the font (equivalent to [`remove_font`](Self::remove_font))
+    /// - Non-empty strings up to 21 bytes are stored
     ///
     /// # Example
     ///
@@ -466,9 +471,7 @@ impl CharacterCapabilities {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn set_font(&mut self, font: BString) -> crate::Result<()> {
-        if font.len() > limits::MAX_FONT_NAME_LENGTH {
-            return Err(SauceError::FontNameTooLong(font.len()));
-        }
+        validate_font(&font)?;
         if font.is_empty() {
             self.font_opt = None;
             return Ok(());
@@ -502,9 +505,8 @@ impl CharacterCapabilities {
 
     /// Serialize these capabilities into a SAUCE header for file storage.
     ///
-    /// This method populates the format-specific fields in the SAUCE header based on
-    /// the data type and character format. Each data type (Character, BinaryText, XBin)
-    /// has different field layouts as specified by the SAUCE standard.
+    /// Populates the format-specific fields of a Character header. For BinaryText
+    /// and XBin, use [`crate::BinaryCapabilities`] instead.
     ///
     /// # Arguments
     ///
@@ -513,8 +515,9 @@ impl CharacterCapabilities {
     /// # Errors
     ///
     /// Returns errors for invalid field values:
-    /// - [`SauceError::BinFileWidthLimitExceeded`]: Binary text width must be even and ≤510
-    /// - [`SauceError::UnsupportedDataType`]: Unsupported SAUCE data type
+    /// - [`SauceError::UnsupportedDataType`]: Header is not Character data
+    /// - [`SauceError::FontNameTooLong`]: Font exceeds 21 bytes
+    /// - [`SauceError::InvalidFontName`]: Font contains an embedded NUL
     ///
     /// # SAUCE Field Mappings
     ///
@@ -525,24 +528,15 @@ impl CharacterCapabilities {
     /// - TFlags: ICE colors, letter spacing, aspect ratio (for ANSI formats)
     /// - TInfoS: Font name (for ANSI formats)
     ///
-    /// **For BinaryText data type:**
-    /// - FileType: Width/2 (width must be even, max 510)
-    /// - TFlags: ICE colors flag
-    /// - TInfoS: Font name
-    ///
-    /// **For XBin data type:**
-    /// - TInfo1: Character width
-    /// - TInfo2: Character height
-    ///
     /// # Example
     ///
-    /// ```ignore
-    /// // Internal serialization example (ignored because `encode_into_header` is not public)
-    /// # use icy_sauce::{CharacterCapabilities, CharacterFormat};
-    /// # use icy_sauce::header::SauceHeader;
+    /// ```
+    /// use icy_sauce::{Capabilities, CharacterCapabilities, CharacterFormat, SauceRecordBuilder};
     /// let caps = CharacterCapabilities::new(CharacterFormat::Ansi);
-    /// let mut header = SauceHeader::default();
-    /// caps.encode_into_header(&mut header)?;
+    /// let record = SauceRecordBuilder::default()
+    ///     .capabilities(Capabilities::Character(caps))?
+    ///     .build();
+    /// assert_eq!(record.header().file_type, 1);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub(crate) fn encode_into_header(&self, header: &mut SauceHeader) -> crate::Result<()> {
@@ -584,9 +578,7 @@ impl CharacterCapabilities {
                         };
 
                         if let Some(font) = &self.font_opt {
-                            if font.len() > limits::MAX_FONT_NAME_LENGTH {
-                                return Err(SauceError::FontNameTooLong(font.len()));
-                            }
+                            validate_font(font)?;
                             header.t_info_s.clone_from(font);
                         } else {
                             header.t_info_s.clear();
@@ -675,11 +667,7 @@ impl TryFrom<&SauceHeader> for CharacterCapabilities {
                 ANSI_ASPECT_RATIO_SQUARE => AspectRatio::Square,
                 _ => AspectRatio::Reserved,
             };
-            font_opt = if header.t_info_s.is_empty() {
-                None
-            } else {
-                Some(header.t_info_s.clone())
-            };
+            font_opt = decode_font(&header.t_info_s);
         } else if format == CharacterFormat::RipScript {
             // RipScript fixed logical dimensions
             columns = 80;

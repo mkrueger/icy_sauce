@@ -115,8 +115,10 @@ fn test_binary_text_flags() {
     }
 
     // Low-level bit check
-    let mut header = SauceHeader::default();
-    header.data_type = SauceDataType::BinaryText;
+    let mut header = SauceHeader {
+        data_type: SauceDataType::BinaryText,
+        ..Default::default()
+    };
     caps.encode_into_header(&mut header).unwrap();
     assert_ne!(header.t_flags & 0b0000_0001, 0); // ICE flag
     assert_ne!(header.t_flags & 0b0000_0010, 0); // 8-pixel spacing
@@ -203,19 +205,19 @@ fn test_get_bin_caps_wrong_type() {
         .data_type(SauceDataType::Character)
         .build();
 
-    match info.capabilities() {
-        Some(Capabilities::Binary(_)) => panic!("Should not return Binary for Character type"),
-        _ => {}
-    }
+    assert!(!matches!(
+        info.capabilities(),
+        Some(Capabilities::Binary(_))
+    ));
 
     let info = SauceRecordBuilder::default()
         .data_type(SauceDataType::Audio)
         .build();
 
-    match info.capabilities() {
-        Some(Capabilities::Binary(_)) => panic!("Should not return Binary for Audio type"),
-        _ => {}
-    }
+    assert!(!matches!(
+        info.capabilities(),
+        Some(Capabilities::Binary(_))
+    ));
 }
 
 #[test]
@@ -284,8 +286,10 @@ fn test_write_to_header_binary_text() {
     caps.letter_spacing = LetterSpacing::EightPixel;
     caps.aspect_ratio = AspectRatio::Square;
 
-    let mut header = SauceHeader::default();
-    header.data_type = SauceDataType::BinaryText;
+    let mut header = SauceHeader {
+        data_type: SauceDataType::BinaryText,
+        ..Default::default()
+    };
     caps.encode_into_header(&mut header).unwrap();
     assert_eq!(header.file_type, 40);
     assert_ne!(header.t_flags & 0b0000_0001, 0);
@@ -294,8 +298,10 @@ fn test_write_to_header_binary_text() {
 #[test]
 fn test_write_to_header_xbin() {
     let caps = BinaryCapabilities::xbin(132, 50).unwrap();
-    let mut header = SauceHeader::default();
-    header.data_type = SauceDataType::XBin;
+    let mut header = SauceHeader {
+        data_type: SauceDataType::XBin,
+        ..Default::default()
+    };
     caps.encode_into_header(&mut header).unwrap();
     assert_eq!(header.file_type, 0);
     assert_eq!(header.t_info1, 132);

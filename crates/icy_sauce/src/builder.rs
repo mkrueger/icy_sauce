@@ -57,7 +57,7 @@ use crate::{
 ///
 /// - Empty strings for title, author, group
 /// - No comments
-/// - DataType: None
+/// - DataType: Character (ASCII)
 /// - FileSize: 0
 ///
 /// # Errors
@@ -353,15 +353,16 @@ impl SauceRecordBuilder {
     ///
     /// # Arguments
     ///
-    /// * `info` - Metadata containing title, author, and group
+    /// * `info` - Metadata containing title, author, group, and comments
     ///
     /// This is a convenience method for bulk-applying basic metadata. It validates all
-    /// fields just like the individual setters.
+    /// fields just like the individual setters. Supplied comments replace existing
+    /// comments (an empty list clears them); format fields and file size are preserved.
     ///
     /// # Errors
     ///
-    /// Returns validation errors if any field (title, author, or group) exceeds its
-    /// maximum length.
+    /// Returns validation errors if a text field or comment exceeds its maximum
+    /// length, or if there are more than 255 comments.
     ///
     /// # Example
     ///
@@ -379,9 +380,15 @@ impl SauceRecordBuilder {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn metadata(self, info: MetaData) -> crate::Result<Self> {
-        self.title(info.title)?
+        let mut builder = self
+            .title(info.title)?
             .author(info.author)?
-            .group(info.group)
+            .group(info.group)?
+            .clear_comments();
+        for comment in info.comments {
+            builder = builder.add_comment(comment)?;
+        }
+        Ok(builder)
     }
 
     /// Add a comment line to the SAUCE record.
@@ -565,6 +572,9 @@ impl SauceRecordBuilder {
     }
 
     /// Set the raw TInfoS field (up to 22 bytes, zero-padded).
+    ///
+    /// This low-level API preserves embedded NULs and unterminated legacy values.
+    /// For a validated, NUL-terminated font name, use the capabilities' `set_font` method.
     ///
     /// For Character types, this typically contains the font name.
     ///

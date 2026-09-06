@@ -25,7 +25,7 @@ SAUCE is a metadata format created in 1994 by ACiD Productions to standardize ho
 - **Type-Safe API**: Strongly typed capabilities for each format type
 - **Builder Pattern**: Convenient builder for creating SAUCE records
 - **Comment Support**: Read and write up to 255 comments per record
-- **CP437 Support**: Works with `bstr` for proper DOS codepage handling
+- **Byte-Preserving Metadata**: Uses `bstr` to retain CP437 and other legacy bytes without implicit UTF-8 conversion
 
 ## Installation
 
@@ -33,7 +33,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-icy_sauce = "0.3.2"
+icy_sauce = "0.4.0"
 ```
 
 ## Basic Usage
@@ -42,6 +42,7 @@ icy_sauce = "0.3.2"
 
 ```rust
 use icy_sauce::prelude::*; // brings common types into scope
+use bstr::ByteSlice;
 use std::fs;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -122,7 +123,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-### Serialization errors
+### Migrating to 0.4
 
 `SauceRecord::to_bytes()` and `to_bytes_without_eof()` now return `Result<Vec<u8>>`.
 Callers migrating from the previous infallible methods must handle the result,
@@ -132,6 +133,17 @@ All date writers reject years outside 0–9999 and month/day values above 99 wit
 `SauceError::UnsupportedSauceDate`, before writing any part of the date or record.
 Calendar validation remains optional: unknown dates (`00000000`) and other
 eight-digit dates are still supported. The `chrono` feature can validate calendar dates.
+
+Font setters now accept at most 21 bytes, reserving a byte for the NUL terminator,
+and reject embedded NULs. Capability font decoders stop at the first NUL.
+The raw `SauceHeader::t_info_s` field and builder's `t_info_s` setter still preserve
+up to 22 raw bytes, including legacy unterminated values and bytes after an embedded
+NUL. Use `record.to_builder()` for lossless edits to such records rather than
+decoding and re-encoding their capabilities.
+
+`SauceRecordBuilder::metadata()` now applies comments as well as title, author,
+and group. Supplied comments replace existing comments, including clearing them
+when the list is empty, matching `MetaData::to_builder()`.
 
 ### Stripping SAUCE Metadata
 
@@ -173,6 +185,10 @@ Multi-record example:
 ```
 
 Headers must be at the exact end of the input. An EOF after the final header prevents stripping in every mode.
+
+Stripping stops at a malformed or truncated advertised comment block and leaves
+that record intact. Read-only parsing may ignore a missing `COMNT` marker, but
+destructive operations do not guess which preceding bytes belong to metadata.
 
 #### Getting Strip Statistics
 
@@ -222,6 +238,9 @@ sauce remove artwork.ans --strip-eof
 - CLI text input is UTF-8. JSON export uses lossy UTF-8 for legacy byte strings,
     so JSON is not a lossless backup format for CP437 metadata. The library itself
     preserves these bytes, as does `alter` for fields not explicitly replaced.
+- Human-readable output escapes terminal control characters and bidirectional
+    overrides in metadata, paths, and errors. JSON retains its normal serialization.
+- Modification commands reject ambiguous comment blocks without changing the file.
 
 ### Example Output
 
@@ -352,7 +371,7 @@ let caps = ArchiveCapabilities { format: ArchiveFormat::Zip };
 SAUCE strings are typically encoded in CP437 (DOS codepage). This library uses `bstr::BString` for all text fields:
 
 ```rust
-use bstr::BString;
+use bstr::{BString, ByteSlice};
 let title = BString::from(b"My \x01 ASCII Art");
 println!("Title: {}", title.to_str_lossy());
 ```
@@ -394,7 +413,7 @@ match caps {
 | `ice_colors`   | Enables 16 background colors (non-blink mode)      | Ignored                       |
 | `letter_spacing` | 8/9 pixel or legacy spacing                      | Ignored (always legacy)       |
 | `aspect_ratio` | Legacy / LegacyDevice / Square                     | Ignored (legacy)              |
-| `font()`       | Optional font name (≤22 bytes)                     | Always `None`                 |
+| `font()`       | Optional font name (≤21 bytes when writing, plus NUL) | Always `None`                 |
 
 ## Specifications
 
@@ -409,6 +428,34 @@ Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE).
 ## Contributing
 
 Issues and PRs welcome: <https://github.com/mkrueger/icy_sauce>.
+
+### Validation
+
+Run from the workspace root:
+
+```bash
+cargo test --workspace --all-features
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps
+cargo fmt --all -- --check
+cargo fmt --manifest-path fuzz/Cargo.toml --all -- --check
+```
+
+The fuzz package is a separate workspace. With `cargo-fuzz` and a nightly
+toolchain installed, bounded smoke runs can be started from the repository root:
+
+```bash
+cargo +nightly fuzz run date_parse -- -runs=1000
+cargo +nightly fuzz run header_parse -- -runs=1000
+cargo +nightly fuzz run strip_logic -- -runs=1000
+```
+
+`strip_logic` checks agreement between stripping APIs, record round trips, and
+preservation of payloads with malformed comment markers. Longer fuzz sessions
+are recommended before release; smoke runs are not exhaustive.
+
+For release verification, `cargo package --workspace` builds both packages using
+the local library version. Publish the library before publishing the dependent CLI.
 
 ## Related Projects
 

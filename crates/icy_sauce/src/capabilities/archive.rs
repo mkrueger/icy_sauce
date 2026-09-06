@@ -191,19 +191,17 @@ impl ArchiveFormat {
     }
 }
 
-/// Check if this format typically provides compression.
+/// Archive file capabilities for SAUCE records.
 ///
-/// # Returns
-///
-/// `true` if the format usually compresses data, `false` if it's primarily
-/// an archive format without compression (like TAR).
+/// Stores only the archive format. Archive records use DataType = Archive (7),
+/// with the format in FileType and no additional format-specific metadata.
 ///
 /// # Example
 ///
 /// ```
-/// use icy_sauce::ArchiveFormat;
-/// assert!(ArchiveFormat::Zip.is_compressed());
-/// assert!(!ArchiveFormat::Tar.is_compressed());
+/// use icy_sauce::{ArchiveCapabilities, ArchiveFormat};
+/// let caps = ArchiveCapabilities::new(ArchiveFormat::Zip);
+/// assert_eq!(caps.format, ArchiveFormat::Zip);
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct ArchiveCapabilities {
@@ -233,7 +231,7 @@ impl ArchiveCapabilities {
 
     /// Write archive capabilities to SAUCE header.
     ///
-    /// Encodes archive metadata into a SAUCE header for serialization. Sets DataType to Archive (11)
+    /// Encodes archive metadata into a SAUCE header for serialization. Sets DataType to Archive (7)
     /// and encodes the format in FileType. All TInfo fields are set to 0 per SAUCE specification
     /// as archives have no additional metadata.
     ///
@@ -243,7 +241,7 @@ impl ArchiveCapabilities {
     ///
     /// # SAUCE Field Mapping
     ///
-    /// * DataType → Archive (11)
+    /// * DataType → Archive (7)
     /// * FileType ← ArchiveFormat::to_sauce() (0-9)
     /// * TInfo1, TInfo2, TInfo3, TInfo4 → 0
     /// * TFlags → 0
@@ -251,12 +249,14 @@ impl ArchiveCapabilities {
     ///
     /// # Example
     ///
-    /// ```ignore
-    /// // Writing directly to a header is internal (pub(crate)); use the builder:
-    /// // let caps = ArchiveCapabilities::new(ArchiveFormat::Rar);
-    /// // SauceRecordBuilder::default()
-    /// //     .data_type(SauceDataType::Archive)
-    /// //     .capabilities(Capabilities::Archive(caps));
+    /// ```
+    /// use icy_sauce::{ArchiveCapabilities, ArchiveFormat, Capabilities, SauceRecordBuilder};
+    ///
+    /// let caps = ArchiveCapabilities::new(ArchiveFormat::Rar);
+    /// let record = SauceRecordBuilder::default()
+    ///     .capabilities(Capabilities::Archive(caps)).unwrap()
+    ///     .build();
+    /// assert_eq!(record.header().file_type, 6);
     /// ```
     pub(crate) fn encode_into_header(&self, header: &mut SauceHeader) -> crate::Result<()> {
         header.data_type = SauceDataType::Archive;

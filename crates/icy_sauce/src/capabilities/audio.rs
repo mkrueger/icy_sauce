@@ -7,8 +7,8 @@
 //!
 //! Audio formats use:
 //! - DataType: Audio (4)
-//! - FileType: Format variant (0-17)
-//! - TInfo1: Sample rate in Hz (for some formats)
+//! - FileType: Format variant (0-24 for known formats)
+//! - TInfo1: Sample rate in Hz (raw PCM samples only; otherwise 0)
 //! - TInfo2-4: All 0
 //! - TFlags: 0
 //! - TInfoS: Empty
@@ -44,7 +44,7 @@ use crate::{SauceDataType, SauceError, header::SauceHeader};
 /// # Format Categories
 ///
 /// ## Tracker/Module Formats (no sample rate metadata)
-/// Formats for sequenced music with instrument data. Sample rate is fixed per format:
+/// Formats for sequenced music with instrument data. SAUCE does not store their sample rate:
 /// - MOD-family: 4/6/8-channel module format (stereo mixing configurable)
 /// - S3M-family: ScreamTracker formats with variable sample rates
 /// - XM/IT: FastTracker 2 and Impulse Tracker formats
@@ -423,7 +423,7 @@ impl AudioFormat {
     ///
     /// # Covered Formats
     ///
-    /// * MOD, 669, STM, S3M, MTM, FAR, ULT, AMF, DMF, OKT, XM, IT, MIDI
+    /// * MOD, 669, STM, S3M, MTM, FAR, ULT, AMF, DMF, OKT, XM, IT
     ///
     /// # Example
     ///
@@ -462,7 +462,7 @@ impl AudioFormat {
 ///
 /// # SAUCE Integration
 ///
-/// Audio records require DataType = Audio (10). Specific format capabilities are encoded
+/// Audio records require DataType = Audio (4). Specific format capabilities are encoded
 /// in the FileType byte (0-24), with optional sample rate in TInfo1 for raw samples.
 ///
 /// # Example
@@ -488,39 +488,6 @@ pub struct AudioCapabilities {
 }
 
 impl AudioCapabilities {
-    /// Parse audio capabilities from a SAUCE header.
-    ///
-    /// # Arguments
-    ///
-    /// * `header` - The SAUCE header to parse
-    ///
-    /// # Returns
-    ///
-    /// Audio capabilities extracted from header fields.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`SauceError::UnsupportedDataType`] if DataType is not Audio.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// // Internal parsing example (ignored because `AudioCapabilities::from` is not public)
-    /// use icy_sauce::{header::SauceHeader, SauceDataType, AudioFormat};
-    /// use icy_sauce::AudioCapabilities;
-    ///
-    /// let mut header = SauceHeader::default();
-    /// header.data_type = SauceDataType::Audio;
-    /// header.file_type = 3; // S3M
-    /// header.t_info1 = 44100;
-    /// use std::convert::TryFrom;
-    /// let caps = AudioCapabilities::try_from(&header).unwrap();
-    /// assert_eq!(caps.format, AudioFormat::S3m);
-    /// assert_eq!(caps.sample_rate, 44100);
-    /// ```
-    /// The bespoke internal `from(&SauceHeader)` has been replaced by a `TryFrom<&SauceHeader>`
-    /// implementation below.
-
     /// Serialize audio capabilities into a SAUCE header.
     ///
     /// # Arguments
@@ -529,13 +496,13 @@ impl AudioCapabilities {
     ///
     /// # Errors
     ///
-    /// Returns [`SauceError::UnsupportedDataType`] if DataType cannot be set to Audio.
+    /// Never fails (returns `Ok(())`).
     ///
     /// # Behavior
     ///
     /// Sets the following header fields:
     /// - DataType = Audio
-    /// - FileType = Format variant (0-17)
+    /// - FileType = Format variant (0-24 for known formats)
     /// - TInfo1 = Sample rate (or 0 if not applicable)
     /// - TInfo2-4 = 0
     /// - TFlags = 0
@@ -543,15 +510,15 @@ impl AudioCapabilities {
     ///
     /// # Example
     ///
-    /// ```ignore
-    /// // Internal serialization example (ignored because `encode_into_header` is not public)
-    /// use icy_sauce::{AudioCapabilities, AudioFormat};
-    /// use icy_sauce::header::SauceHeader;
+    /// ```
+    /// use icy_sauce::{AudioCapabilities, AudioFormat, Capabilities, SauceRecordBuilder};
     ///
     /// let caps = AudioCapabilities { format: AudioFormat::Mod, sample_rate: 0 };
-    /// let mut header = SauceHeader::default();
-    /// caps.encode_into_header(&mut header).unwrap();
-    /// assert_eq!(header.file_type, 0);
+    /// let record = SauceRecordBuilder::default()
+    ///     .capabilities(Capabilities::Audio(caps)).unwrap()
+    ///     .build();
+    /// assert_eq!(record.header().file_type, 0);
+    /// assert_eq!(record.header().t_info1, 0);
     /// ```
     pub(crate) fn encode_into_header(&self, header: &mut SauceHeader) -> crate::Result<()> {
         header.data_type = SauceDataType::Audio;
@@ -582,6 +549,36 @@ impl AudioCapabilities {
 
 impl TryFrom<&SauceHeader> for AudioCapabilities {
     type Error = SauceError;
+
+    /// Parse audio capabilities from a SAUCE header.
+    ///
+    /// Only raw PCM sample formats read the sample rate from TInfo1. Other formats
+    /// return a sample rate of 0, even if the header contains a nonzero TInfo1.
+    /// Unknown file types are preserved as [`AudioFormat::Unknown`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SauceError::UnsupportedDataType`] if DataType is not Audio.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use icy_sauce::{header::SauceHeader, SauceDataType, AudioFormat, AudioCapabilities};
+    ///
+    /// let mut header = SauceHeader {
+    ///     data_type: SauceDataType::Audio,
+    ///     file_type: AudioFormat::S3m.to_sauce(),
+    ///     t_info1: 44_100,
+    ///     ..SauceHeader::default()
+    /// };
+    /// let caps = AudioCapabilities::try_from(&header).unwrap();
+    /// assert_eq!(caps.format, AudioFormat::S3m);
+    /// assert_eq!(caps.sample_rate, 0);
+    ///
+    /// header.file_type = AudioFormat::Smp16s.to_sauce();
+    /// let caps = AudioCapabilities::try_from(&header).unwrap();
+    /// assert_eq!(caps.sample_rate, 44_100);
+    /// ```
     fn try_from(header: &SauceHeader) -> crate::Result<Self> {
         if header.data_type != SauceDataType::Audio {
             return Err(SauceError::UnsupportedDataType(header.data_type));

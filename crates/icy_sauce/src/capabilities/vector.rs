@@ -13,12 +13,9 @@
 //! # SAUCE Field Mappings
 //!
 //! Vector formats use:
-//! - DataType: Vector (2)
+//! - DataType: Vector (3)
 //! - FileType: Format variant (0-3)
-//! - TInfo1: Width in pixels (optional)
-//! - TInfo2: Height in pixels (optional)
-//! - TInfo3: Depth in pixels (optional for 3D formats)
-//! - TInfo4: 0
+//! - TInfo1-4: All 0
 //! - TFlags: 0
 //! - TInfoS: Empty
 
@@ -68,7 +65,20 @@ impl VectorFormat {
 /// Vector graphics file capabilities for SAUCE records.
 ///
 /// Represents vector-specific metadata parsed from or to be written to a SAUCE header.
-/// This includes the vector format and optional dimensions.
+/// Stores only the vector format; vector records have no dimension fields.
+///
+/// # Example
+///
+/// ```
+/// use icy_sauce::{Capabilities, SauceRecordBuilder, VectorCapabilities, VectorFormat};
+///
+/// let record = SauceRecordBuilder::default()
+///     .capabilities(Capabilities::Vector(VectorCapabilities::new(VectorFormat::Dxf)))
+///     .unwrap()
+///     .build();
+/// assert_eq!(record.header().file_type, 0);
+/// assert_eq!(record.header().t_info1, 0);
+/// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct VectorCapabilities {
     /// Vector graphics format
@@ -80,9 +90,6 @@ impl VectorCapabilities {
     pub fn new(format: VectorFormat) -> Self {
         Self { format }
     }
-
-    /// Parse vector capabilities from a SAUCE header via the `TryFrom<&SauceHeader>` implementation.
-    /// The former bespoke `from(&SauceHeader)` has been removed in favor of the standard trait.
 
     /// Serialize vector capabilities into a SAUCE header.
     pub(crate) fn encode_into_header(&self, header: &mut SauceHeader) -> crate::Result<()> {
@@ -105,6 +112,28 @@ impl VectorCapabilities {
 
 impl TryFrom<&SauceHeader> for VectorCapabilities {
     type Error = SauceError;
+
+    /// Parse the vector format from a SAUCE header, ignoring TInfo fields.
+    ///
+    /// Unknown file types are preserved as [`VectorFormat::Unknown`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SauceError::UnsupportedDataType`] if DataType is not Vector.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use icy_sauce::{header::SauceHeader, SauceDataType, VectorCapabilities, VectorFormat};
+    ///
+    /// let header = SauceHeader {
+    ///     data_type: SauceDataType::Vector,
+    ///     file_type: VectorFormat::ThreeDs.to_sauce(),
+    ///     ..SauceHeader::default()
+    /// };
+    /// let caps = VectorCapabilities::try_from(&header).unwrap();
+    /// assert_eq!(caps.format, VectorFormat::ThreeDs);
+    /// ```
     fn try_from(header: &SauceHeader) -> crate::Result<Self> {
         if header.data_type != SauceDataType::Vector {
             return Err(SauceError::UnsupportedDataType(header.data_type));
