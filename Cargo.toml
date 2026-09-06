@@ -4,6 +4,7 @@ members = ["crates/icy_sauce", "crates/icy_sauce_cli"]
 
 [workspace.package]
 edition = "2024"
+rust-version = "1.89"
 authors = ["Mike Krüger <mkrueger@posteo.de>"]
 homepage = "https://github.com/mkrueger/icy_sauce"
 repository = "https://github.com/mkrueger/icy_sauce"

@@ -48,14 +48,12 @@ impl SauceJson {
     fn from_record(sauce: &SauceRecord) -> Self {
         let header = sauce.header();
         let date = sauce.date();
-        let date_str = if date.year != 0 || date.month != 0 || date.day != 0 {
-            Some(format!(
-                "{:04}-{:02}-{:02}",
-                date.year, date.month, date.day
-            ))
-        } else {
-            None
-        };
+        // Exports are snapshots: represent empty values explicitly so importing
+        // them clears these fields. Omitted input fields still mean no change.
+        let date_str = Some(format!(
+            "{:04}-{:02}-{:02}",
+            date.year, date.month, date.day
+        ));
 
         SauceJson {
             title: Some(sauce.title().to_str_lossy().into_owned()),
@@ -77,11 +75,7 @@ impl SauceJson {
             tinfo3: Some(header.t_info3),
             tinfo4: Some(header.t_info4),
             tflags: Some(header.t_flags),
-            tinfos: if header.t_info_s.is_empty() {
-                None
-            } else {
-                Some(header.t_info_s.to_str_lossy().into_owned())
-            },
+            tinfos: Some(header.t_info_s.to_str_lossy().into_owned()),
         }
     }
 
@@ -336,7 +330,11 @@ enum Commands {
         /// File to remove SAUCE from
         file: PathBuf,
 
-        /// Remove all SAUCE records (not just the last one)
+        /// Remove all contiguous SAUCE records (not just the last one)
+        ///
+        /// If stripping stops with a SAUCE header remaining, valid trailing
+        /// records are still removed, but the command reports partial removal
+        /// and exits with status 1.
         #[arg(short, long)]
         all: bool,
 
@@ -638,16 +636,78 @@ fn parse_date(date_str: &str) -> Result<SauceDate, Box<dyn std::error::Error>> {
         .ok_or_else(|| "Date must be in YYYYMMDD or YYYY-MM-DD format using ASCII digits".into())
 }
 
-/// Replace a file atomically, preserving its permissions and following symlinks.
+/// A pinned input target and the bytes read from that same file handle.
+/// Resolve caller-supplied symlinks once, before reading, never again for writing.
+struct FileSnapshot {
+    path: PathBuf,
+    identity: same_file::Handle,
+    data: Vec<u8>,
+}
+
+impl FileSnapshot {
+    fn read(file: &Path) -> io::Result<Self> {
+        let path = fs::canonicalize(file)?;
+        let mut original = fs::File::open(&path)?;
+        if !original.metadata()?.is_file() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Not a regular file",
+            ));
+        }
+        let identity = same_file::Handle::from_file(original.try_clone()?)?;
+        let mut data = Vec::new();
+        original.read_to_end(&mut data)?;
+        Ok(Self {
+            path,
+            identity,
+            data,
+        })
+    }
+
+    /// Best-effort conflict detection, not a lock against uncooperative writers.
+    fn verify_unchanged(&self) -> io::Result<()> {
+        let mut current = fs::File::open(&self.path)?;
+        let identity = same_file::Handle::from_file(current.try_clone()?)?;
+        if identity != self.identity {
+            return Err(io::Error::other(
+                "File target changed since it was read; refusing replacement",
+            ));
+        }
+        // Compare using bounded scratch space rather than another full-file copy.
+        let mut buffer = [0; 8192];
+        for expected in self.data.chunks(buffer.len()) {
+            current.read_exact(&mut buffer[..expected.len()])?;
+            if &buffer[..expected.len()] != expected {
+                return Err(io::Error::other(
+                    "File contents changed since they were read; refusing replacement",
+                ));
+            }
+        }
+        if current.read(&mut buffer[..1])? != 0 {
+            return Err(io::Error::other(
+                "File contents changed since they were read; refusing replacement",
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// Atomically replace the pinned target, preserving permissions.
 /// A failed write leaves the original intact; the temporary file is cleaned up.
 fn write_atomic(
-    file: &Path,
+    snapshot: &FileSnapshot,
     write: impl FnOnce(&mut fs::File) -> io::Result<()>,
 ) -> io::Result<()> {
-    let path = fs::canonicalize(file)?;
+    let path = &snapshot.path;
+    snapshot.verify_unchanged()?;
     // Check write access without truncating; rename alone would also replace
     // read-only files when the containing directory is writable.
-    let original = fs::OpenOptions::new().write(true).open(&path)?;
+    let original = fs::OpenOptions::new().write(true).open(path)?;
+    if same_file::Handle::from_file(original.try_clone()?)? != snapshot.identity {
+        return Err(io::Error::other(
+            "File target changed since it was read; refusing replacement",
+        ));
+    }
     let metadata = original.metadata()?;
     if !metadata.is_file() {
         return Err(io::Error::new(
@@ -664,8 +724,9 @@ fn write_atomic(
         .as_file()
         .set_permissions(metadata.permissions())?;
     temporary.as_file().sync_all()?;
+    snapshot.verify_unchanged()?;
     drop(original);
-    temporary.persist(&path).map_err(|error| error.error)?;
+    temporary.persist(path).map_err(|error| error.error)?;
     Ok(())
 }
 
@@ -691,19 +752,20 @@ fn add_sauce(
     // Load JSON input if provided
     let json = from_json.as_ref().map(|p| read_json_input(p)).transpose()?;
 
-    let data = fs::read(file)?;
+    let snapshot = FileSnapshot::read(file)?;
+    let data = &snapshot.data;
 
     // Check if SAUCE already exists
-    let has_sauce = SauceRecord::from_bytes(&data)?.is_some();
+    let has_sauce = SauceRecord::from_bytes(data)?.is_some();
     if has_sauce && !force {
         return Err("File already has SAUCE metadata. Use --force to overwrite.".into());
     }
 
     // Strip existing SAUCE if force is set
     let content = if has_sauce {
-        checked_strip(&data, StripMode::LastStripFinalEof)?.to_vec()
+        checked_strip(data, StripMode::LastStripFinalEof)?
     } else {
-        data
+        data.as_slice()
     };
 
     // Zero denotes an unknown size for payloads too large for the wire field.
@@ -716,9 +778,9 @@ fn add_sauce(
 
     let sauce = builder.build();
 
-    let mut output = content;
+    let mut output = content.to_vec();
     sauce.write(&mut output)?;
-    write_atomic(file, |writer| writer.write_all(&output))?;
+    write_atomic(&snapshot, |writer| writer.write_all(&output))?;
 
     println!("SAUCE metadata added to '{}'", display_path(file));
     Ok(())
@@ -734,14 +796,15 @@ fn alter_sauce(
     // Load JSON input if provided
     let json = from_json.as_ref().map(|p| read_json_input(p)).transpose()?;
 
-    let data = fs::read(file)?;
+    let snapshot = FileSnapshot::read(file)?;
+    let data = &snapshot.data;
 
-    let Some(existing) = SauceRecord::from_bytes(&data)? else {
+    let Some(existing) = SauceRecord::from_bytes(data)? else {
         return Err("No SAUCE record found. Use 'add' command to create one.".into());
     };
 
     // Strip the existing SAUCE to get the content
-    let content = checked_strip(&data, StripMode::LastStripFinalEof)?;
+    let content = checked_strip(data, StripMode::LastStripFinalEof)?;
 
     // Preserve all untouched byte strings, file size, and raw format fields.
     if clear_comments {
@@ -761,17 +824,18 @@ fn alter_sauce(
 
     let mut output = content.to_vec();
     sauce.write(&mut output)?;
-    write_atomic(file, |writer| writer.write_all(&output))?;
+    write_atomic(&snapshot, |writer| writer.write_all(&output))?;
 
     println!("SAUCE metadata updated in '{}'", display_path(file));
     Ok(())
 }
 
 fn remove_sauce(file: &Path, all: bool, strip_eof: bool) -> Result<(), Box<dyn std::error::Error>> {
-    let data = fs::read(file)?;
+    let snapshot = FileSnapshot::read(file)?;
+    let data = &snapshot.data;
 
     // Check if there's actually SAUCE to remove
-    if SauceRecord::from_bytes(&data)?.is_none() {
+    if SauceRecord::from_bytes(data)?.is_none() {
         println!("No SAUCE record found in '{}'", display_path(file));
         return Ok(());
     }
@@ -783,11 +847,26 @@ fn remove_sauce(file: &Path, all: bool, strip_eof: bool) -> Result<(), Box<dyn s
         (true, true) => StripMode::AllStripFinalEof,
     };
 
-    let stripped = checked_strip(&data, mode)?;
-    write_atomic(file, |writer| writer.write_all(stripped))?;
+    let stripped = checked_strip(data, mode)?;
+    write_atomic(&snapshot, |writer| writer.write_all(stripped))?;
+
+    // Stripping deliberately stops at malformed or unsupported headers. Report
+    // the partial update rather than claiming that every record was removed.
+    if all
+        && !matches!(
+            icy_sauce::header::SauceHeader::from_bytes(stripped),
+            Ok(None)
+        )
+    {
+        return Err(format!(
+            "Partial removal in '{}': valid trailing records were removed, but a remaining SAUCE header was preserved because stripping stopped.",
+            display_path(file)
+        )
+        .into());
+    }
 
     let records = if all {
-        "All SAUCE records"
+        "All contiguous SAUCE records"
     } else {
         "SAUCE record"
     };
@@ -905,12 +984,93 @@ More info: https://www.acid.org/info/sauce/sauce.htm
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
+    #[test]
+    fn retargeted_input_symlink_never_overwrites_the_new_target() {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempfile::tempdir().unwrap();
+        let original = directory.path().join("original.ans");
+        let other = directory.path().join("other.ans");
+        let link = directory.path().join("link.ans");
+        fs::write(&original, b"original").unwrap();
+        fs::write(&other, b"unrelated").unwrap();
+        symlink(&original, &link).unwrap();
+        let snapshot = FileSnapshot::read(&link).unwrap();
+        fs::remove_file(&link).unwrap();
+        symlink(&other, &link).unwrap();
+
+        write_atomic(&snapshot, |writer| writer.write_all(b"updated original")).unwrap();
+        assert_eq!(fs::read(&original).unwrap(), b"updated original");
+        assert_eq!(fs::read(&other).unwrap(), b"unrelated");
+        assert_eq!(fs::read_link(&link).unwrap(), other);
+    }
+
+    #[test]
+    fn replaced_target_is_rejected_even_with_identical_contents() {
+        let directory = tempfile::tempdir().unwrap();
+        let file = directory.path().join("art.ans");
+        let old = directory.path().join("old.ans");
+        fs::write(&file, b"original").unwrap();
+        let snapshot = FileSnapshot::read(&file).unwrap();
+        fs::rename(&file, &old).unwrap();
+        fs::write(&file, b"original").unwrap();
+
+        let error = write_atomic(&snapshot, |_| panic!("must reject before writing")).unwrap_err();
+        assert!(error.to_string().contains("target changed"));
+        assert_eq!(fs::read(&file).unwrap(), b"original");
+        assert_eq!(fs::read(&old).unwrap(), b"original");
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 2);
+    }
+
+    #[test]
+    fn concurrent_content_changes_are_preserved() {
+        for contents in [b"modified".as_slice(), b"longer contents", b"short"] {
+            for during_write in [false, true] {
+                let directory = tempfile::tempdir().unwrap();
+                let file = directory.path().join("art.ans");
+                fs::write(&file, b"original").unwrap();
+                let snapshot = FileSnapshot::read(&file).unwrap();
+                if !during_write {
+                    fs::write(&file, contents).unwrap();
+                }
+                let result = write_atomic(&snapshot, |writer| {
+                    assert!(during_write, "must reject before writing");
+                    writer.write_all(b"replacement")?;
+                    fs::write(&file, contents)
+                });
+                assert!(result.is_err());
+                assert_eq!(fs::read(&file).unwrap(), contents);
+                assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
+            }
+        }
+    }
+
+    #[test]
+    fn target_replaced_during_temporary_write_is_preserved() {
+        let directory = tempfile::tempdir().unwrap();
+        let file = directory.path().join("art.ans");
+        let old = directory.path().join("old.ans");
+        fs::write(&file, b"original").unwrap();
+        let snapshot = FileSnapshot::read(&file).unwrap();
+        let result = write_atomic(&snapshot, |writer| {
+            writer.write_all(b"replacement")?;
+            fs::rename(&file, &old)?;
+            fs::write(&file, b"unrelated")
+        });
+        assert!(result.is_err());
+        assert_eq!(fs::read(&file).unwrap(), b"unrelated");
+        assert_eq!(fs::read(&old).unwrap(), b"original");
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 2);
+    }
+
     #[test]
     fn failed_atomic_write_preserves_original_and_cleans_up() {
         let directory = tempfile::tempdir().unwrap();
         let file = directory.path().join("art.ans");
         fs::write(&file, b"original").unwrap();
-        let result = write_atomic(&file, |writer| {
+        let snapshot = FileSnapshot::read(&file).unwrap();
+        let result = write_atomic(&snapshot, |writer| {
             writer.write_all(b"partial replacement")?;
             Err(io::Error::other("simulated write failure"))
         });

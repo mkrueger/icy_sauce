@@ -144,6 +144,41 @@ fn json_file_size_is_honored_for_add_and_alter_including_zero() {
 }
 
 #[test]
+fn json_snapshot_restores_empty_date_and_font() {
+    let original = SauceRecordBuilder::default().build();
+    let fixture = Fixture::new(Some(&original));
+    let original_bytes = fs::read(&fixture.file).unwrap();
+    let output = fixture.command("view").arg("--json").output().unwrap();
+    assert!(output.status.success());
+    let metadata: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(metadata["date"], "0000-00-00");
+    assert_eq!(metadata["tinfos"], "");
+    let snapshot = fixture.json_path(metadata);
+
+    fixture.run("alter", &["--date", "2026-09-06", "--tinfos", "IBM VGA"]);
+    assert_eq!(fixture.record().date(), SauceDate::new(2026, 9, 6));
+    assert_eq!(fixture.record().header().t_info_s, "IBM VGA");
+    fixture.run("alter", &["--from-json", snapshot.to_str().unwrap()]);
+    assert_eq!(fs::read(&fixture.file).unwrap(), original_bytes);
+}
+
+#[test]
+fn partial_json_preserves_omitted_date_and_font() {
+    let original = SauceRecordBuilder::default()
+        .date(SauceDate::new(2026, 9, 6))
+        .t_info_s("IBM VGA".into())
+        .unwrap()
+        .build();
+    let fixture = Fixture::new(Some(&original));
+    let path = fixture.json_path(json!({"title": "Updated"}));
+    fixture.run("alter", &["--from-json", path.to_str().unwrap()]);
+    let record = fixture.record();
+    assert_eq!(record.title(), "Updated");
+    assert_eq!(record.date(), original.date());
+    assert_eq!(record.header().t_info_s, original.header().t_info_s);
+}
+
+#[test]
 fn cli_comments_override_json_and_work_with_omitted_json_comments() {
     for metadata in [json!({}), json!({"comments": ["JSON"]})] {
         let fixture = Fixture::new(None);
@@ -355,6 +390,74 @@ fn malformed_comment_blocks_cannot_be_modified_or_removed() {
             assert_eq!(output.status.code(), Some(1));
             assert_eq!(fs::read(&fixture.file).unwrap(), original);
         }
+    }
+}
+
+#[test]
+fn remove_all_reports_partial_removal_and_preserves_invalid_earlier_records() {
+    use icy_sauce::header::SauceHeader;
+
+    for args in [vec!["--all"], vec!["--all", "--strip-eof"]] {
+        // Missing marker, truncated comments, and an unsupported version.
+        for (comments, unsupported_version) in [(1, false), (255, false), (0, true)] {
+            let fixture = Fixture::new(None);
+            let mut earlier = vec![b'A'; 100];
+            earlier.push(0x1a);
+            let header_start = earlier.len();
+            SauceHeader {
+                comments,
+                ..Default::default()
+            }
+            .write(&mut earlier)
+            .unwrap();
+            if unsupported_version {
+                earlier[header_start + 5..header_start + 7].copy_from_slice(b"01");
+            }
+            let mut bytes = earlier.clone();
+            let valid = SauceRecordBuilder::default().build().to_bytes().unwrap();
+            bytes.extend_from_slice(&valid);
+            bytes.extend_from_slice(&valid);
+            fs::write(&fixture.file, bytes).unwrap();
+
+            let output = fixture.command("remove").args(&args).output().unwrap();
+            assert_eq!(output.status.code(), Some(1));
+            assert!(output.stdout.is_empty());
+            let error = String::from_utf8(output.stderr).unwrap();
+            assert!(error.contains("Partial removal"));
+            assert!(error.contains("remaining SAUCE header was preserved"));
+            assert!(error.contains("art.ans"));
+            assert_eq!(fs::read(&fixture.file).unwrap(), earlier);
+        }
+    }
+}
+
+#[test]
+fn remove_all_reports_success_for_valid_stacked_records() {
+    for strip_eof in [false, true] {
+        let record = SauceRecordBuilder::default().build();
+        let fixture = Fixture::new(Some(&record));
+        let mut bytes = fs::read(&fixture.file).unwrap();
+        bytes.extend(record.to_bytes().unwrap());
+        fs::write(&fixture.file, bytes).unwrap();
+        let mut command = fixture.command("remove");
+        command.arg("--all");
+        if strip_eof {
+            command.arg("--strip-eof");
+        }
+        let output = command.output().unwrap();
+        assert!(output.status.success());
+        assert!(output.stderr.is_empty());
+        assert!(
+            String::from_utf8(output.stdout)
+                .unwrap()
+                .contains("All contiguous SAUCE records removed")
+        );
+        let expected = if strip_eof {
+            &PAYLOAD[..PAYLOAD.len() - 1]
+        } else {
+            PAYLOAD
+        };
+        assert_eq!(fs::read(&fixture.file).unwrap(), expected);
     }
 }
 

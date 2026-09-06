@@ -29,6 +29,9 @@ SAUCE is a metadata format created in 1994 by ACiD Productions to standardize ho
 
 ## Installation
 
+Requires Rust 1.89 or newer. CI tests both the minimum supported Rust version
+and the current stable toolchain.
+
 Add this to your `Cargo.toml`:
 
 ```toml
@@ -145,6 +148,10 @@ decoding and re-encoding their capabilities.
 and group. Supplied comments replace existing comments, including clearing them
 when the list is empty, matching `MetaData::to_builder()`.
 
+`SauceRecordBuilder::capabilities()` selects the matching data and file types,
+including when switching an existing record to Character capabilities. Basic
+metadata, comments, date, and file size are preserved.
+
 ### Stripping SAUCE Metadata
 
 You can remove one or more SAUCE records (and optionally their preceding EOF 0x1A marker) from the end of a file buffer without copying the data using `strip_sauce`.
@@ -235,12 +242,25 @@ sauce remove artwork.ans --strip-eof
     permission bits and following symlinks. Atomic replacement creates a new inode;
     other hard links keep their old contents, and ownership, ACLs, and extended
     attributes are not copied.
+- Mutating commands resolve symlinks before reading and keep that resolved target
+    for writing. Retargeting the input symlink does not redirect the write.
+    File identity and content checks reject detected changes before replacement.
+    These checks are best-effort, not transaction isolation: avoid concurrent writers
+    or changes to the resolved path or its parent directories during an operation.
+    A change after the final check can still race with the rename.
 - CLI text input is UTF-8. JSON export uses lossy UTF-8 for legacy byte strings,
     so JSON is not a lossless backup format for CP437 metadata. The library itself
     preserves these bytes, as does `alter` for fields not explicitly replaced.
+- JSON exports explicitly include `"date": "0000-00-00"` for an unknown date and
+    `"tinfos": ""` for an empty font/raw TInfoS field. Reimporting these values clears
+    the corresponding fields; omitting them in a partial JSON update preserves them.
 - Human-readable output escapes terminal control characters and bidirectional
     overrides in metadata, paths, and errors. JSON retains its normal serialization.
-- Modification commands reject ambiguous comment blocks without changing the file.
+- Modification commands reject an ambiguous comment block in the trailing record
+    without changing the file. With `remove --all`, valid trailing records can be
+    removed before stripping stops at an older malformed or unsupported header.
+    If a SAUCE header remains at the resulting tail, the CLI reports partial removal
+    and exits with status 1; the already removed records are not restored.
 
 ### Example Output
 

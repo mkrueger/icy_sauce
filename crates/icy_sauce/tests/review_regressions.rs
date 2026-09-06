@@ -139,6 +139,87 @@ fn font_writers_reserve_a_terminator_and_reject_embedded_nuls() {
 }
 
 #[test]
+fn character_capabilities_select_the_data_type_and_replace_format_fields() {
+    let base = SauceRecordBuilder::default()
+        .title("Preserved title".into())
+        .unwrap()
+        .author("Author".into())
+        .unwrap()
+        .group("Group".into())
+        .unwrap()
+        .date(icy_sauce::SauceDate::new(2026, 9, 6))
+        .file_size(42)
+        .add_comment("Preserved comment".into())
+        .unwrap()
+        .build();
+    for format in [
+        CharacterFormat::Ascii,
+        CharacterFormat::Ansi,
+        CharacterFormat::AnsiMation,
+        CharacterFormat::RipScript,
+        CharacterFormat::PCBoard,
+        CharacterFormat::Avatar,
+        CharacterFormat::TundraDraw,
+        CharacterFormat::Html,
+        CharacterFormat::Source,
+        CharacterFormat::Unknown(99),
+    ] {
+        let caps = Capabilities::Character(CharacterCapabilities::new(format));
+        let expected = base
+            .to_builder()
+            .capabilities(caps.clone())
+            .unwrap()
+            .build();
+        for data_type in [
+            SauceDataType::None,
+            SauceDataType::Character,
+            SauceDataType::Bitmap,
+            SauceDataType::Vector,
+            SauceDataType::Audio,
+            SauceDataType::BinaryText,
+            SauceDataType::XBin,
+            SauceDataType::Archive,
+            SauceDataType::Executable,
+            SauceDataType::Undefined(99),
+        ] {
+            let record = base
+                .to_builder()
+                .data_type(data_type)
+                .file_type(255)
+                .t_info1(321)
+                .t_info2(456)
+                .t_info3(789)
+                .t_info4(987)
+                .t_flags(255)
+                .t_info_s("Old font".into())
+                .unwrap()
+                .capabilities(caps.clone())
+                .unwrap()
+                .build();
+            assert!(record == expected, "{data_type:?} -> {format:?}");
+        }
+    }
+}
+
+#[test]
+fn capabilities_can_switch_between_character_and_binary() {
+    let character = Capabilities::Character(CharacterCapabilities::new(CharacterFormat::Ansi));
+    let binary = Capabilities::Binary(BinaryCapabilities::binary_text(80).unwrap());
+    let original = SauceRecordBuilder::default()
+        .capabilities(character.clone())
+        .unwrap()
+        .build();
+    let switched = original.to_builder().capabilities(binary).unwrap().build();
+    assert_eq!(switched.data_type(), SauceDataType::BinaryText);
+    let restored = switched
+        .to_builder()
+        .capabilities(character)
+        .unwrap()
+        .build();
+    assert!(restored == original);
+}
+
+#[test]
 fn metadata_replaces_comments_and_uses_the_same_validation() {
     let original = SauceRecordBuilder::default()
         .file_size(42)

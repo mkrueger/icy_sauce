@@ -319,8 +319,9 @@ impl SauceRecordBuilder {
     /// * `caps` - A [`Capabilities`] enum containing format-specific metadata
     ///
     /// This method serializes the capabilities into the appropriate header fields
-    /// (TInfo1-TInfo4, TFlags, TInfoS) based on the capability type. The capabilities
-    /// must be compatible with the data type set via [`data_type`](Self::data_type).
+    /// (TInfo1-TInfo4, TFlags, TInfoS) based on the capability type. It also selects
+    /// the matching DataType and FileType, replacing any previously set values.
+    /// Basic metadata, comments, date, and file size are preserved.
     ///
     /// # Errors
     ///
@@ -338,7 +339,10 @@ impl SauceRecordBuilder {
     /// ```
     pub fn capabilities(mut self, caps: Capabilities) -> crate::Result<Self> {
         match caps {
-            Capabilities::Character(c) => c.encode_into_header(&mut self.header)?,
+            Capabilities::Character(c) => {
+                self.header.data_type = SauceDataType::Character;
+                c.encode_into_header(&mut self.header)?;
+            }
             Capabilities::Binary(c) => c.encode_into_header(&mut self.header)?,
             Capabilities::Bitmap(c) => c.encode_into_header(&mut self.header)?,
             Capabilities::Vector(c) => c.encode_into_header(&mut self.header)?,
