@@ -242,6 +242,10 @@ sauce remove artwork.ans --strip-eof
     permission bits and following symlinks. Atomic replacement creates a new inode;
     other hard links keep their old contents, and ownership, ACLs, and extended
     attributes are not copied.
+- On Unix, the parent directory is synced after atomic replacement to strengthen
+    crash durability. If that sync fails, the command returns an error stating that
+    the file was already replaced but crash durability is uncertain; no rollback
+    is attempted. Other platforms retain their existing file-sync behavior.
 - Mutating commands resolve symlinks before reading and keep that resolved target
     for writing. Retargeting the input symlink does not redirect the write.
     File identity and content checks reject detected changes before replacement.

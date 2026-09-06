@@ -51,6 +51,9 @@ Notable changes to icy_sauce are documented here.
 - Replace files atomically using a temporary file in the same directory while
   preserving permission bits and following symlink targets. Hard-link updates,
   ownership, ACLs, and extended attributes are not preserved.
+- Sync the parent directory after atomic replacement on Unix. Directory sync
+  failures explicitly report that replacement completed but crash durability is
+  uncertain, rather than implying the original file remains unchanged.
 - Escape terminal control and bidirectional formatting characters in
   human-readable metadata, paths, and errors without changing JSON export values.
 - Read only the bounded trailing metadata window when viewing files.

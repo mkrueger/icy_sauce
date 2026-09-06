@@ -693,7 +693,9 @@ impl FileSnapshot {
 }
 
 /// Atomically replace the pinned target, preserving permissions.
-/// A failed write leaves the original intact; the temporary file is cleaned up.
+/// Failures before persistence leave the original intact and clean up the temporary file.
+/// On Unix, sync the parent directory after persistence for rename durability.
+/// A directory sync failure is reported after replacement; it cannot roll it back.
 fn write_atomic(
     snapshot: &FileSnapshot,
     write: impl FnOnce(&mut fs::File) -> io::Result<()>,
@@ -718,6 +720,10 @@ fn write_atomic(
     let parent = path.parent().ok_or_else(|| {
         io::Error::new(io::ErrorKind::InvalidInput, "File has no parent directory")
     })?;
+    // Open before replacement so failure to acquire the directory handle leaves
+    // the original untouched, and retain it across the rename.
+    #[cfg(unix)]
+    let parent_directory = fs::File::open(parent)?;
     let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
     write(temporary.as_file_mut())?;
     temporary
@@ -727,6 +733,15 @@ fn write_atomic(
     snapshot.verify_unchanged()?;
     drop(original);
     temporary.persist(path).map_err(|error| error.error)?;
+    #[cfg(unix)]
+    parent_directory.sync_all().map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!(
+                "File was replaced, but syncing the parent directory failed; crash durability is uncertain: {error}"
+            ),
+        )
+    })?;
     Ok(())
 }
 
